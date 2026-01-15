@@ -2,7 +2,18 @@
 
 A web-based application to manage and automate 3D printing operations on a Bambu Lab A1 Combo AMS printer farm. This system handles automatic job queuing, multi-printer management, printing history tracking, and automated slicing via OrcaSlicer.
 
-## 📋 Project Overview
+## � Repository
+
+- **GitHub:** https://github.com/kevinwiliamleo-dev/3d-print-farm-management
+- **Visibility:** Private 🔒
+- **Main Branch:** `main` (production/stable code)
+- **Development Branch:** `development` (active development)
+
+### Branches
+- `main` - Production-ready stable code
+- `development` - Active development and new features
+
+## �📋 Project Overview
 
 **Purpose:** Streamline 3D printing operations by automating file slicing, print job scheduling, queue management, and multi-printer control.
 
