@@ -36,316 +36,127 @@ All new features and changes are developed in the `development` branch. After te
 
 ---
 
-## 🎯 Core Features
+## ✨ Key Features
 
-### 1. **File Upload & Automated Slicing**
-- Upload .3mf or .stl files
-- Automatic slicing using OrcaSlicer CLI
-- Customizable print settings (layer height, infill, etc)
-- Generate optimized G-code for Bambu Lab A1
+### 🔄 Automated Workflow
+- **File Upload**: 3MF/STL file support
+- **Auto-Slicing**: OrcaSlicer CLI integration with custom presets
+- **Smart Queue**: FIFO with loop count support (print jobs multiple times)
+- **Auto-Transfer**: FTPS upload to printer SD card
+- **MQTT Control**: Start/stop/pause/resume commands
 
-### 2. **Print Job Management**
-- Queue multiple jobs
-- Set loop count per job (how many times to print each job)
-- Sequential job execution (Job A with 5 loops → Job B with 3 loops)
+### 📊 Real-Time Monitoring
+- **Live Status**: WebSocket-based progress tracking
+- **Print Progress**: Time remaining, layer count, percentage
+- **Camera Feed**: Auto-reload on tab switch
+- **Dual Stop Detection**: Detects stops from both web UI and printer LCD
+- **Accurate Time Display**: Proper minute-to-second conversion
 
-### 3. **Queue Management**
-- FIFO (First In, First Out) execution
-- Pause/Resume queue capability
-- Job priority and ordering
-- Real-time queue status
+### 🎛️ Printer Management
+- **Multi-Printer Support**: Independent queue per printer
+- **AMS Slot Control**: Assign filaments to AMS slots
+- **Filament Inventory**: Track materials, colors, temperatures, stock levels
+- **Auto-Eject**: Automatic bed clearing after completion
+- **Status Sync**: Database + UI updates on all state changes
 
-### 4. **Printer Control**
-- Integrate with Bambu Lab MQTT API
-- Send G-code to printer
-- Auto-eject after print completion
-- Automatic transition to next job
-
-### 5. **Monitoring & History**
-- Print job history with timestamps
-- Slicing settings logged
-- Material tracking
-- Print duration logging
-- Success/failure status
-- Auto-eject time tracking
-
-### 6. **Multi-Printer Support**
-- Scalable for additional Bambu Lab printers
-- Independent queue management per printer
-- Centralized dashboard
-
-### 7. **Filament Inventory Management** ✨ NEW
-- Complete filament profile database (brand, material, color, temps, settings)
-- Stock tracking (spool count, remaining grams)
-- Temperature presets (nozzle & bed min/max/default)
-- Physical properties (density, diameter, K-factor)
-- Drying requirements
-- Purchase links and notes
-
-### 8. **AMS Slot Assignment** ✨ NEW
-- Visual AMS slot display matching printer
-- Assign filaments from inventory to AMS slots
-- Real-time slot status from MQTT
-- Load/Unload filament with progress display
-- Remaining filament tracking per slot
-- MQTT sync with printer settings
-
-### 9. **Real-Time Status Monitoring** ✨ ENHANCED (Jan 2026)
-- **Print Progress Container**: Always visible with idle state support
-- **Accurate Time Tracking**: Fixed remaining time conversion (minutes → seconds)
-- **Smart Camera Reload**: Auto-reload on Status tab click
-- **Print Stopped Detection**: Detects stop from both web system and printer
-- **Live Status Updates**: WebSocket-based real-time updates
-- **Progress Bar**: Visual indicator with percentage and layer count
-- **Status Cards**: Time remaining, current layer, progress percentage
-
-### 10. **Enhanced Print Control**
-- Pause/Resume/Stop with database sync
-- Automatic queue status updates
-- Print stopped callback system
-- Comprehensive error logging
-- Status synchronization across UI components
-
----
+### 📈 History & Tracking
+- Complete print history with timestamps
+- Slicing settings logged per job
+- Material usage tracking
+- Success/failure rates
+- Print duration analytics
 
 ## 🆕 Recent Updates (January 2026)
 
-### UI/UX Improvements
-- ✅ **Print Progress Always Visible**: Container shows status even when idle (displays "-" for inactive)
-- ✅ **Camera Auto-Reload**: Camera feed reloads when switching to Status tab
-- ✅ **Fixed Time Display**: Remaining time now correctly converted from minutes to seconds
-- ✅ **Enhanced Status Cards**: Conditional styling for active/idle states
+**UI/UX Enhancements:**
+- Print progress always visible (shows idle state)
+- Camera auto-reload on tab switch
+- Fixed time display (proper minute-to-second conversion)
+- Enhanced status cards with conditional styling
 
-### Print Status Detection
-- ✅ **Dual Stop Detection**: System now detects print stopped from:
-  - Web interface (Stop button)
-  - Printer LCD interface (manual stop)
-- ✅ **Queue Status Sync**: Queue automatically updates to "stopped" when print cancelled from printer
-- ✅ **Callback System**: `on_print_stopped` callback detects gcode_state transitions
-
-### Code Quality
-- ✅ **Git Repository**: Initialized with proper .gitignore
-- ✅ **GitHub Integration**: Private repository with development branch
-- ✅ **Branch Workflow**: `development` → testing → `main`
+**System Improvements:**
+- Dual stop detection (web UI + printer LCD)
+- Automatic queue status sync
+- Callback system for print state transitions
+- Cleaned codebase: removed 94 test/utility files (~11,646 lines)
 
 ---
 
-## ⚠️ IMPORTANT: Print Startup Behavior Fix (January 2026)
+## ⚙️ Print Startup Configuration (January 2026)
 
-### Masalah yang Diperbaiki
-Saat print dimulai via sistem (queue/API), printer menunggu di **depan bed** dengan purge line, bukan di posisi **cut filament** (samping) seperti saat kirim manual via CMD.
+**Issue Fixed:** Printer was waiting at front of bed with purge line instead of cut filament position (side).
 
-### Root Cause
-1. **MQTT Calibration Parameters**: Parameter `flow_cali`, `vibration_cali`, `bed_leveling` dikirim sebagai `False`, yang membuat printer menjalankan kalibrasi built-in sendiri.
-2. **Template `prepare_print`**: Template G-code yang memindahkan nozzle ke `G1 X108.000 Y-0.500` (depan bed) diaktifkan secara default.
-3. **Setting default `prepare_print=True`**: Ada di DUA file yang harus di-set `False`.
+**Root Cause:**
+- MQTT calibration parameters set to `False` triggered built-in calibration
+- G-code template `prepare_print` moved nozzle to front of bed by default
+- Default settings in multiple files needed coordination
 
-### Solusi yang Diterapkan
+**Solution Applied:**
 
-#### 1. MQTT Parameters (Always TRUE = Skip Built-in Calibration)
-**File:** `src/services/bambu_service.py`, `src/services/print_control_service.py`, `src/services/queue_service.py`
-```python
-# TRUE = skip printer's built-in calibration (use G-code calibration instead)
-"flow_cali": True,
-"vibration_cali": True,
-"bed_leveling": True
-```
+1. **MQTT Calibration Parameters** (Always `True` = Skip Built-in Cal)
+   - Files: `bambu_service.py`, `print_control_service.py`, `queue_service.py`
+   ```python
+   "flow_cali": True,
+   "vibration_cali": True,
+   "bed_leveling": True
+   ```
 
-#### 2. Template `prepare_print` Default = False
-**File 1:** `src/services/gcode_templates.py` (line ~86)
-```python
-prepare_print: bool = False  # DEFAULT OFF - avoid moving to front of bed
-```
+2. **G-code Templates Defaults**
+   - Files: `gcode_templates.py`, `gcode_preprocessor.py`
+   ```python
+   prepare_print: bool = False      # Avoid moving to front
+   nozzle_load_line: bool = False   # Avoid purge line
+   ```
 
-**File 2:** `src/services/gcode_preprocessor.py` (line ~72)
-```python
-prepare_print: bool = False  # DEFAULT OFF - avoid moving to front of bed
-```
+3. **Database:** Template ID 43 (Prepare Print) disabled
 
-#### 3. Template `nozzle_load_line` Default = False
-**File 1:** `src/services/gcode_templates.py` (line ~76)
-```python
-nozzle_load_line: bool = False  # DEFAULT OFF to avoid purge line at front of bed
-```
-
-**File 2:** `src/services/gcode_preprocessor.py` (line ~43)
-```python
-nozzle_load_line: bool = False  # DEFAULT OFF to avoid unwanted purge
-```
-
-#### 4. Database Template Disabled
-```sql
-UPDATE gcode_templates SET enabled=0 WHERE template_id=43;  -- Prepare Print
-```
-
-### Hasil
-- ✅ Printer sekarang menunggu di posisi **cut filament** (samping/X-48.2)
-- ✅ Tidak ada purge line di depan bed
-- ✅ Perilaku sama seperti kirim manual via CMD
-
-### File yang Terlibat
-| File | Perubahan |
-|------|-----------|
-| `src/services/gcode_templates.py` | `prepare_print=False`, `nozzle_load_line=False` |
-| `src/services/gcode_preprocessor.py` | `prepare_print=False`, `nozzle_load_line=False` |
-| `src/services/bambu_service.py` | MQTT params selalu `True` |
-| `src/services/print_control_service.py` | MQTT params selalu `True` |
-| `src/services/queue_service.py` | MQTT params selalu `True`, preprocessing aktif |
-| `data/farm.db` | Template ID 43 disabled |
+**Result:** ✅ Printer waits at cut filament position (X-48.2), no purge line at front
 
 ---
 
-## 🔧 Technical Implementation Details
+## 🔧 Technical Implementation Highlights
 
-### Print Stopped Detection System
+### Dual Stop Detection
+**Problem:** Queue didn't update when print stopped from printer LCD.  
+**Solution:** MQTT callback system detects `gcode_state` transitions.
 
-**Problem Solved:** Queue status didn't update when print was stopped from printer LCD (only worked from web interface).
-
-**Solution:** Callback system to detect gcode_state transitions from MQTT.
-
-**Implementation:**
-
-1. **bambu_service.py** - State Detection
 ```python
+# bambu_service.py
 def on_print_stopped(self):
-    """Callback when print is stopped (from printer or system)"""
-    # Detects: gcode_state transitions from printing/paused to idle
-    # Condition: progress < 100% (incomplete print)
+    # Detects: printing/paused → idle (progress < 100%)
+    
+# main.py  
+def handle_print_stopped(printer_id):
+    # Update queue & job status to "stopped"
+    # Broadcast via WebSocket
+
+# Flow:
+# Printer LCD Stop → MQTT FAILED → bambu_service → callback → DB update → UI
 ```
 
-2. **main.py** - Queue Update Handler
-```python
-def handle_print_stopped(printer_id: str):
-    """Update queue status when print stopped from printer"""
-    # Find active queue item (status: running/paused)
-    # Update queue status to "stopped"
-    # Update job status to "stopped"
-    # Log the event
-```
+### Camera Auto-Reload
+**Problem:** Camera didn't reload without page refresh.  
+**Solution:** React key prop change forces component remount.
 
-3. **Callback Registration**
-```python
-bambu_client.on_print_stopped = handle_print_stopped
-```
-
-**Flow:**
-```
-Printer LCD Stop → MQTT gcode_state: FAILED → bambu_service detects change
-→ on_print_stopped callback → handle_print_stopped() → Update database
-→ WebSocket broadcast → Frontend updates UI
-```
-
-### Camera Auto-Reload System
-
-**Problem Solved:** Camera didn't reload without full page refresh.
-
-**Solution:** Component remount via key prop change on tab click.
-
-**Implementation:**
-
-1. **Dashboard.tsx** - Tab Click Handler
 ```typescript
 const [cameraKey, setCameraKey] = useState(0);
 
 const handleTabClick = (tab: string) => {
-  if (tab === 'status') {
-    setCameraKey(prev => prev + 1); // Increment key to force remount
-  }
-  setActiveTab(tab);
+  if (tab === 'status') setCameraKey(prev => prev + 1);
 };
 
-// Pass key to PrinterStatus component
 <PrinterStatus key={cameraKey} printer={printer} />
 ```
 
-**Effect:** New key causes React to unmount and remount component, triggering fresh camera connection.
+### Time Display Fix
+**Problem:** Remaining time showed minutes as seconds.  
+**Root Cause:** MQTT sends `mc_remaining_time` in minutes.  
+**Solution:** Convert to seconds in backend.
 
-### Remaining Time Accuracy Fix
-
-**Problem Solved:** Remaining time displayed incorrectly (showed minutes as seconds).
-
-**Root Cause:** Bambu Lab MQTT sends `mc_remaining_time` in **minutes**, but system treated it as seconds.
-
-**Solution:**
-
-1. **bambu_service.py** - Conversion
 ```python
-self.remaining_time: int = 0  # Store in SECONDS
-
-# On MQTT message
-if "mc_remaining_time" in print_data:
-    mc_remaining_time = int(print_data["mc_remaining_time"])
-    self.remaining_time = mc_remaining_time * 60  # Convert to seconds
+# Backend: mc_remaining_time * 60 → seconds
+# Frontend: formatRemainingTime(seconds) → "3h 9m"
 ```
-
-2. **print_control.py** - API Response
-```python
-@router.get("/{printer_id}/mqtt-status")
-async def get_mqtt_status(printer_id: str):
-    return {
-        "remaining_time": status.get("mc_remaining_time", 0)  # Already in seconds
-    }
-```
-
-3. **Frontend** - Display
-```typescript
-const formatRemainingTime = (seconds: number): string => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours}h ${minutes}m`;
-};
-```
-
-**Example:** 189 minutes → 11,340 seconds → "3h 9m" ✅ (not "3m" ❌)
-
-### Print Progress Always Visible
-
-**Problem Solved:** Progress container disappeared when printer was idle.
-
-**Solution:** Conditional rendering within container, not of the container itself.
-
-**Implementation:**
-
-**PrinterStatus.tsx**
-```typescript
-{/* Container ALWAYS renders */}
-<div style={{ backgroundColor: '#ffffff', padding: '20px' }}>
-  
-  {/* Progress bar ONLY when printing/paused */}
-  {(status === 'printing' || status === 'paused') && (
-    <div className="progress-bar">...</div>
-  )}
-  
-  {/* Status cards ALWAYS show */}
-  <div className="status-cards">
-    {/* Remaining Time - shows "-" when idle */}
-    <div>
-      {(status === 'printing' || status === 'paused') 
-        ? formatRemainingTime(remainingTime)
-        : '-'  // Gray dash when idle
-      }
-    </div>
-    
-    {/* Layer - shows "-" when idle */}
-    <div>
-      {(status === 'printing' || status === 'paused')
-        ? `${currentLayer} / ${totalLayers}`
-        : '-'  // Gray dash when idle
-      }
-    </div>
-  </div>
-  
-  {/* Control buttons ONLY when printing/paused */}
-  {(status === 'printing' || status === 'paused') && (
-    <div className="control-buttons">...</div>
-  )}
-</div>
-```
-
-**Result:** 
-- Idle: Shows gray "-" in cards, no progress bar, no buttons
-- Printing: Shows data, progress bar, and control buttons
-- Layout remains stable (no jumping)
 
 ---
 
@@ -948,23 +759,15 @@ Mode:            LAN Mode (local network)
 | No time estimate | Missing slice_info | Check `Metadata/slice_info.config` exists |
 | "Invalid gcode" | Wrong structure | Verify `Metadata/plate_1.gcode` exists |
 
-### Quick Diagnostic Commands
+### Diagnostic Tools
 
 ```bash
-# Check 3MF structure
-python check_3mf_structure.py
+# Check database status
+sqlite3 data/farm.db "SELECT * FROM queue WHERE status='running'"
 
-# List files on SD card
-python explore_sd_card.py
-
-# Test MQTT connection
-python test_mqtt.py
-
-# Test FTPS connection
-python test_direct_upload.py
-
-# Check database queue
-python -c "import sqlite3; c=sqlite3.connect('data/farm.db').cursor(); c.execute('SELECT * FROM queue'); print(c.fetchall())"
+# View logs
+tail -f logs/backend.log    # Linux/macOS
+Get-Content logs/backend.log -Tail 50 -Wait  # Windows
 ```
 
 ---
@@ -972,64 +775,51 @@ python -c "import sqlite3; c=sqlite3.connect('data/farm.db').cursor(); c.execute
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Python 3.10+ (for modern async features)
-- Node.js 18+ (for React frontend)
-- OrcaSlicer installed (for automated slicing)
+- Python 3.10+
+- Node.js 18+
+- OrcaSlicer (CLI slicing)
 - Bambu Lab A1 Combo AMS printer
-- Bambu Lab account (for Cloud API access)
-- Local server/machine to host the application
 
-### Installation Steps
+### Quick Start
 
-1. **Clone/Create Project Structure**
-   ```bash
-   cd cooking-ai-agent
-   ```
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
 
-2. **Backend Setup**
-   ```bash
-   # Install Python dependencies
-   pip install -r requirements.txt
-   
-   # Configure environment
-   cp .env.example .env
-   # Add your Bambu Lab credentials and printer details
-   ```
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your Bambu Lab credentials and printer IP/serial
 
-3. **Frontend Setup**
-   ```bash
-   cd frontend
-   npm install
-   npm start
-   ```
+# 3. Run (auto-starts backend + frontend)
+start.bat           # Windows
+./start.sh          # Linux/macOS
+```
 
-4. **Run Application**
-   ```bash
-   python src/main.py
-   ```
+**Access:** http://localhost:3000
 
 ---
 
 ## 📝 Configuration
 
 ### .env File
-```
+```env
 # Bambu Lab Credentials
 BAMBU_USERNAME=your_email@example.com
-BAMBU_PASSWORD=your_password
-BAMBU_PRINTER_ID=printer_serial_number
+BAMBU_ACCESS_CODE=your_access_code
+BAMBU_PRINTER_IP=192.168.1.100
+BAMBU_PRINTER_ID=03900D5A2402051
+BAMBU_PRINTER_SN=03900D5A2402051
 
-# Server Configuration
-FLASK_HOST=0.0.0.0
-FLASK_PORT=5000
+# Server
+BACKEND_PORT=8000
+FRONTEND_PORT=3000
 
 # Database
 DB_PATH=./data/farm.db
-
-# MQTT Settings
-MQTT_BROKER=mqtt.bambulab.com
-MQTT_PORT=8883
 ```
+
+See [SETUP.md](SETUP.md) for detailed configuration guide.
 
 ---
 
@@ -1443,1346 +1233,25 @@ def queue_and_send_job(input_file, loop_count, printer_id):
 
 ---
 
-## 📞 Notes
+## � Additional Documentation
 
-- This is a personal project for 3D print farm automation
-- Initial focus on single Bambu Lab A1 Combo AMS
-- Design allows easy expansion to multiple printers
-- OrcaSlicer handles all file slicing and optimization
-- Follow naming conventions to minimize confusion during development
-
----
-
-**Project Status:** 🚧 In Development - Phase 4 (Testing & Refinement)
-**Last Updated:** January 3, 2026
+For detailed information, see:
+- [SETUP.md](SETUP.md) - Detailed setup guide
+- [QUICKSTART.md](QUICKSTART.md) - Quick start tutorial  
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
+- [docs/COMPREHENSIVE_DOCUMENTATION.md](docs/COMPREHENSIVE_DOCUMENTATION.md) - Complete reference
+- [docs/FRONTEND_DOCUMENTATION.md](docs/FRONTEND_DOCUMENTATION.md) - Frontend components
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development guide
 
 ---
 
-## 📝 Development Log
+## 📞 Support & Contributing
 
-### January 3, 2026 - Print Control & WebSocket Stability Fixes 🔧
-**Session Focus:** Fix 7 critical issues with print control buttons and real-time updates
+This is a personal project for 3D print farm automation. For questions or suggestions, please open an issue on GitHub.
 
-#### ✅ Issues Fixed:
-
-1. **Stop Button Not Working** (Issue #1)
-   - **Problem:** Stop button didn't cancel running print
-   - **Root Cause:** `stop_print()` used instance variable instead of database query
-   - **Solution:** Query database for running queue item:
-   ```python
-   # OLD (broken)
-   queue_item = self.current_print_queue_item
-   
-   # NEW (working)
-   queue_item = db.execute(
-       text("SELECT * FROM queue WHERE printer_id = :printer_id AND status = 'running' LIMIT 1"),
-       {"printer_id": printer_id}
-   ).fetchone()
-   ```
-
-2. **Pause Button Not Working** (Issue #2)
-   - **Problem:** Pause button didn't pause print
-   - **Solution:** Same fix as stop - query database for running item
-
-3. **Process Logs Missing** (Issue #3)
-   - **Problem:** No console logs for debugging
-   - **Solution:** Added comprehensive logging:
-   ```typescript
-   // Frontend: PrinterStatus.tsx
-   console.log('[PrinterStatus] handlePause clicked, printer:', printer.printerId);
-   console.log('[PrinterStatus] Pause API response:', response);
-   
-   // Backend: print_control.py
-   logger.info(f"🔴 [STOP] Button pressed for printer: {printer_id}")
-   logger.info(f"⏸️ [PAUSE] Button pressed for printer: {printer_id}")
-   ```
-
-4. **Time Display Inaccurate** (Issue #4)
-   - **Problem:** Remaining time not showing correctly
-   - **Solution:** Added `remaining_time` and `current_file` to WebSocket and API:
-   ```python
-   # websocket.py
-   "remaining_time": status.get("mc_remaining_time", 0),
-   "current_file": status.get("subtask_name", ""),
-   ```
-
-5. **Resume Button Not Syncing** (Issue #5)
-   - **Problem:** Resume button state not matching printer status
-   - **Solution:** Added useEffect to sync `isPaused` with printer status:
-   ```typescript
-   useEffect(() => {
-       if (printer.status === 'PAUSED' && !isPaused) {
-           setIsPaused(true);
-       } else if (printer.status !== 'PAUSED' && isPaused) {
-           setIsPaused(false);
-       }
-   }, [printer.status, isPaused]);
-   ```
-
-6. **Button Action Logs Missing** (Issue #6)
-   - **Problem:** No logs showing button clicks
-   - **Solution:** Added logging to all button handlers and API calls
-
-7. **WebSocket Disconnects Randomly** (Issue #7)
-   - **Problem:** WebSocket would disconnect when tab inactive
-   - **Solution:** Added heartbeat, visibility change, and focus handlers:
-   ```typescript
-   // useWebSocket.ts
-   
-   // Heartbeat response
-   if (data.type === 'ping') {
-       ws.send(JSON.stringify({ type: 'pong' }));
-   }
-   
-   // Visibility change handler
-   document.addEventListener('visibilitychange', () => {
-       if (document.visibilityState === 'visible' && !ws?.readyState) {
-           connectWebSocket();
-       }
-   });
-   
-   // Window focus handler
-   window.addEventListener('focus', checkConnection);
-   ```
-
-#### 📝 Files Modified:
-
-| File | Changes |
-|------|---------|
-| `src/services/print_control_service.py` | Database queries for pause/stop/cancel |
-| `src/api/print_control.py` | Added logging for all endpoints |
-| `src/api/websocket.py` | Added remaining_time, current_file, ping handler |
-| `frontend/src/api/client.ts` | Added remainingTime, currentFile to PrinterResponse |
-| `frontend/src/components/PrinterStatus.tsx` | Time display, isPaused sync, logging |
-| `frontend/src/components/Dashboard.tsx` | Handle new fields in state |
-| `frontend/src/hooks/useWebSocket.ts` | Heartbeat, visibility, focus handlers |
-
-#### 🔧 Technical Details:
-
-**Print Control Service Refactor:**
-```python
-# src/services/print_control_service.py
-
-def pause_print(self, printer_id: str) -> dict:
-    """Pause using database query instead of instance variable"""
-    with get_db() as db:
-        result = db.execute(
-            text("""SELECT * FROM queue 
-                    WHERE printer_id = :printer_id 
-                    AND status IN ('running', 'paused') 
-                    LIMIT 1"""),
-            {"printer_id": printer_id}
-        )
-        queue_item = result.fetchone()
-        
-        if queue_item:
-            # Send MQTT pause command
-            mqtt_client.pause_print()
-            
-            # Update database
-            db.execute(
-                text("UPDATE queue SET status = 'paused' WHERE queue_id = :id"),
-                {"id": queue_item.queue_id}
-            )
-            db.commit()
-```
-
-**WebSocket Heartbeat:**
-```python
-# src/api/websocket.py
-
-@router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    while True:
-        try:
-            data = await asyncio.wait_for(
-                websocket.receive_text(),
-                timeout=1.0
-            )
-            message = json.loads(data)
-            if message.get("type") == "pong":
-                # Client responded to ping
-                pass
-        except asyncio.TimeoutError:
-            # Send ping to check connection
-            await websocket.send_json({"type": "ping"})
-```
+**Project Status:** ✅ Production Ready  
+**Last Updated:** January 15, 2026
 
 ---
 
-### January 1, 2026 - Filament Inventory & AMS Slot Management System 📦
-**Session Focus:** Complete filament inventory management with AMS slot assignment
-
-#### ✅ Completed Features:
-
-1. **Filament Profile Database** (`src/database/db.py`)
-   - New table: `filament_profiles` for storing complete filament specifications
-   - Comprehensive filament properties stored:
-     - Basic: name, brand, material_type, color_name, color_hex (RRGGBBAA)
-     - Temperature: nozzle_temp_min/max/default, bed_temp_min/max/default
-     - Print settings: max_volumetric_speed, k_value (pressure advance)
-     - Physical: density, diameter (1.75/2.85mm), spool_weight
-     - Drying: drying_temp, drying_time
-     - Compatibility: requires_enclosure, requires_hardened_nozzle
-     - Stock: stock_count, notes, purchase_link
-
-2. **AMS Slot Assignment Database** (`migrate_ams_slots.py`)
-   - New table: `ams_slot_assignments` linking slots to filament inventory
-   - Schema:
-     ```sql
-     CREATE TABLE ams_slot_assignments (
-         id INTEGER PRIMARY KEY,
-         printer_id TEXT NOT NULL,
-         slot_number INTEGER NOT NULL,
-         filament_id INTEGER,  -- FK to filament_profiles
-         remaining_grams REAL DEFAULT 0,
-         assigned_at TIMESTAMP,
-         updated_at TIMESTAMP,
-         UNIQUE(printer_id, slot_number)
-     )
-     ```
-
-3. **Filament API Endpoints** (`src/api/filaments.py`)
-
-   | Method | Endpoint | Description |
-   |--------|----------|-------------|
-   | GET | `/api/filaments` | List all filament profiles |
-   | POST | `/api/filaments` | Create new filament profile |
-   | GET | `/api/filaments/{id}` | Get filament by ID |
-   | PUT | `/api/filaments/{id}` | Update filament profile |
-   | DELETE | `/api/filaments/{id}` | Delete filament |
-   | GET | `/api/filaments/slots/{printer_id}` | Get slot assignments with filament details |
-   | POST | `/api/filaments/slots/{printer_id}/{slot}` | Assign filament to slot |
-   | PUT | `/api/filaments/slots/{printer_id}/{slot}/remaining` | Update remaining grams |
-   | POST | `/api/filaments/{id}/apply/{printer_id}/{slot}` | Apply filament settings to printer |
-   | POST | `/api/filaments/{id}/stock/add` | Add stock to filament |
-
-4. **Frontend Filament Inventory Tab** (`frontend/src/components/FilamentInventoryTab.tsx`)
-   - Grid display of all filaments with color swatches
-   - Add new filament form with all properties
-   - Edit existing filament
-   - Delete filament
-   - Stock management (add/remove spools)
-   - Search and filter by material type
-
-5. **AMS Status Display Component** (`frontend/src/components/AmsStatusDisplay.tsx`)
-   - Visual 4-slot AMS representation
-   - Click slot to edit assignment
-   - Shows: filament name, brand, material type, color, remaining grams
-   - Connection status indicator
-   - Current active slot highlight
-
-6. **Slot Assignment Modal Flow**
-   ```
-   User clicks "Edit" on slot
-       ↓
-   Modal opens with filament selection grid
-       ↓
-   User selects filament from inventory
-       ↓
-   API: POST /api/filaments/slots/{printer_id}/{slot}
-       ↓
-   MQTT: ams_filament_setting() sent to printer
-       ↓
-   UI updates with new filament info
-       ↓
-   Load/Unload buttons available
-   ```
-
-7. **AMS MQTT Commands** (`src/services/bambu_service.py`)
-   ```python
-   # Set filament settings on AMS slot
-   def ams_filament_setting(slot, tray_color, tray_type):
-       command = {
-           "print": {
-               "sequence_id": "0",
-               "command": "ams_filament_setting",
-               "ams_id": 0,
-               "tray_id": slot,
-               "tray_color": tray_color,  # "FF0000FF" format
-               "nozzle_temp_min": 190,
-               "nozzle_temp_max": 240,
-               "tray_type": tray_type  # "PLA", "PETG", etc.
-           }
-       }
-   
-   # Load filament from slot
-   def ams_load_filament(slot):
-       command = {"print": {"command": "ams_change_filament", "target": slot}}
-   
-   # Unload current filament
-   def ams_unload_filament():
-       command = {"print": {"command": "unload_filament"}}
-   ```
-
-#### 📊 Database Schema:
-
-**Table: filament_profiles**
-```
-filament_id       INTEGER PRIMARY KEY
-name              TEXT NOT NULL        -- "Bambu PLA Basic - Black"
-brand             TEXT NOT NULL        -- "Bambu Lab"
-material_type     TEXT NOT NULL        -- "PLA", "PETG", "ABS"
-color_name        TEXT                 -- "Matte Black"
-color_hex         TEXT DEFAULT "000000FF"  -- RRGGBBAA
-nozzle_temp_min   INTEGER DEFAULT 190
-nozzle_temp_max   INTEGER DEFAULT 240
-nozzle_temp_default INTEGER DEFAULT 220
-bed_temp_min      INTEGER DEFAULT 45
-bed_temp_max      INTEGER DEFAULT 65
-bed_temp_default  INTEGER DEFAULT 55
-max_volumetric_speed REAL DEFAULT 12.0
-k_value           REAL DEFAULT 0.02
-density           REAL DEFAULT 1.24
-diameter          REAL DEFAULT 1.75
-spool_weight      REAL DEFAULT 1000
-drying_temp       INTEGER DEFAULT 50
-drying_time       INTEGER DEFAULT 8
-requires_enclosure BOOLEAN DEFAULT FALSE
-requires_hardened_nozzle BOOLEAN DEFAULT FALSE
-notes             TEXT
-purchase_link     TEXT
-stock_count       INTEGER DEFAULT 0
-is_active         BOOLEAN DEFAULT TRUE
-created_at        TIMESTAMP
-updated_at        TIMESTAMP
-```
-
-**Table: ams_slot_assignments**
-```
-id                INTEGER PRIMARY KEY
-printer_id        TEXT NOT NULL
-slot_number       INTEGER NOT NULL (0-3)
-filament_id       INTEGER FK → filament_profiles
-remaining_grams   REAL DEFAULT 0
-assigned_at       TIMESTAMP
-updated_at        TIMESTAMP
-UNIQUE(printer_id, slot_number)
-```
-
-#### 📝 Files Created/Modified:
-
-| File | Purpose |
-|------|---------|
-| `src/database/db.py` | FilamentProfile SQLAlchemy model |
-| `src/api/filaments.py` | Full CRUD API + slot assignment endpoints |
-| `migrate_filament_profiles.py` | Migration script for filament_profiles table |
-| `migrate_ams_slots.py` | Migration script for ams_slot_assignments table |
-| `frontend/src/components/FilamentInventoryTab.tsx` | Inventory UI component |
-| `frontend/src/components/AmsStatusDisplay.tsx` | AMS visual display + slot editing |
-| `frontend/src/api/client.ts` | API client methods + transformFilament fix |
-
-#### 🔧 Bug Fixes:
-
-1. **SQL text() wrapper** - Fixed raw SQL queries with `sqlalchemy.text()`
-2. **filament_id mapping** - Fixed `transformFilament` to use `f.filament_id || f.id`
-3. **Slot assignment API** - Fixed 500 error on `/api/filaments/slots/{printer_id}`
-
----
-
-### January 1, 2026 - AMS Filament Load/Unload Progress Display 🔄
-**Session Focus:** Implement realistic load/unload progress UI matching printer screen
-
-#### ✅ Completed:
-
-1. **AMS Slot Management UI Improvements** (`frontend/src/components/AmsStatusDisplay.tsx`)
-   - Removed remaining filament input box from detail modal (user request: "nggak perlu ada remaining fillament input box")
-   - Added load/unload progress display matching printer's 6-step process
-   - Progress stays visible until user clicks Done/Cancel (tidak langsung hilang)
-
-2. **Load Progress Steps (Matching Printer Display)**
-   ```typescript
-   const LOAD_STEPS = [
-     { name: 'Heat the Nozzle', showTemp: true },      // Step 1 - Shows temperature
-     { name: 'Check filament location', showTemp: false },
-     { name: 'Cut filament', showTemp: false },
-     { name: 'Pull back current filament', showTemp: false },
-     { name: 'Push new filament into extruder', showTemp: false },
-     { name: 'Purge old filament', showTemp: false },  // Step 6
-   ];
-   
-   const UNLOAD_STEPS = [
-     { name: 'Heat the Nozzle', showTemp: true },
-     { name: 'Check filament location', showTemp: false },
-     { name: 'Pull back filament', showTemp: false },
-     { name: 'Complete', showTemp: false },
-   ];
-   ```
-
-3. **Temperature Display During Heating**
-   - Shows real-time nozzle temperature during "Heat the Nozzle" step
-   - Format: `(30°C → 220°C)` with yellow color highlight
-   - Temperature simulated incrementally (will be replaced with real MQTT data)
-
-4. **Progress State Management**
-   ```typescript
-   const [loadProgress, setLoadProgress] = useState<{
-     active: boolean,      // Is progress display visible
-     step: number,         // Current step index (0-5)
-     isUnload: boolean,    // Load vs Unload mode
-     nozzleTemp: number,   // Current nozzle temperature
-     targetTemp: number,   // Target temperature (220°C)
-     completed: boolean    // All steps done
-   }>({
-     active: false, step: 0, isUnload: false, 
-     nozzleTemp: 0, targetTemp: 220, completed: false
-   });
-   ```
-
-5. **Progress UI Features**
-   - Dark theme modal matching printer display aesthetic
-   - Numbered steps with circular indicators
-   - ✓ checkmark for completed steps
-   - ⏳ spinner for current step
-   - Blue highlight for active step
-   - Green "Complete" badge when finished
-   - **Done** button - closes progress (green)
-   - **Retry** button - runs load/unload again
-   - **Cancel** button - stops and closes progress (red)
-
-6. **API Integration**
-   - Fixed SQL queries with `sqlalchemy.text()` wrapper for slot assignments
-   - Fixed `transformFilament` to use `f.filament_id || f.id` for proper ID mapping
-   - Load/Unload commands sent via `printFarmClient.amsLoadFilament()` / `amsUnloadFilament()`
-
-#### 🎨 Visual Design:
-
-```
-┌─────────────────────────────────────────┐
-│ 🔄 Load Filament              ✓ Complete │
-├─────────────────────────────────────────┤
-│ ✓ 1  Heat the Nozzle (220°C → 220°C)    │
-│ ✓ 2  Check filament location            │
-│ ✓ 3  Cut filament                       │
-│ ✓ 4  Pull back current filament         │
-│ ✓ 5  Push new filament into extruder    │
-│ ✓ 6  Purge old filament                 │
-├─────────────────────────────────────────┤
-│  [  ✓ Done  ]    [  ↻ Retry  ]          │
-└─────────────────────────────────────────┘
-```
-
-#### 📝 Files Modified:
-
-| File | Changes |
-|------|---------|
-| `frontend/src/components/AmsStatusDisplay.tsx` | Complete overhaul of load progress system |
-| `frontend/src/api/client.ts` | Fixed `transformFilament` ID mapping |
-| `src/api/filaments.py` | Added `sqlalchemy.text()` wrapper for raw SQL |
-
-#### 🔧 Technical Details:
-
-**State Flow:**
-```
-User clicks "Load Filament"
-    ↓
-setLoadProgress({ active: true, step: 0, nozzleTemp: 0 })
-    ↓
-Send MQTT load command via API
-    ↓
-Interval updates temperature (simulated heating)
-    ↓
-When temp >= 200°C, advance to step 1
-    ↓
-Auto-advance through steps 2-5
-    ↓
-setLoadProgress({ completed: true })
-    ↓
-User clicks "Done" to close
-```
-
-**Interval Cleanup:**
-```typescript
-// Store interval ID for cleanup
-(window as any).__loadProgressInterval = progressInterval;
-
-// Cancel function clears interval
-const handleCancelProgress = () => {
-  if ((window as any).__loadProgressInterval) {
-    clearInterval((window as any).__loadProgressInterval);
-  }
-  setLoadProgress({ active: false, ... });
-};
-```
-
-#### 🔜 Future Improvements:
-- [ ] Poll actual printer temperature via MQTT instead of simulation
-- [ ] Get real step status from `mc_print_stage` MQTT field
-- [ ] Add error handling if load/unload fails
-- [ ] Sound notification when complete
-
----
-
-### January 1, 2026 - SD Card Print via MQTT (CRITICAL DISCOVERY) 🎉
-**Session Focus:** Print file langsung dari SD card printer via MQTT command
-
-#### ✅ SOLVED: Print from SD Card
-
-Setelah mempelajari FDM Monster dan OctoPrint-BambuPrinter, ditemukan format yang benar untuk mengirim perintah print file dari SD card:
-
-**Format MQTT Command yang BENAR untuk Bambu Lab A1:**
-```python
-project_command = {
-    "print": {
-        "sequence_id": str(int(time.time() * 1000)),  # Timestamp string, BUKAN "0"
-        "command": "project_file",
-        "param": "Metadata/plate_1.gcode",  # Gcode path dalam 3MF
-        "md5": "",
-        "profile_id": "0",
-        "project_id": "0",
-        "subtask_id": "0",
-        "task_id": "0",
-        "subtask_name": "filename.3mf",  # Nama file untuk display di UI
-        "url": "file:///sdcard/cache/filename.3mf",  # ⚠️ PENTING: format ini!
-        "bed_type": "auto",
-        "timelapse": False,
-        "bed_leveling": True,
-        "flow_cali": False,
-        "vibration_cali": False,
-        "layer_inspect": False,
-        "use_ams": True,
-        "ams_mapping": ""
-    }
-}
-```
-
-#### 🔑 Key Findings:
-
-| Parameter | Format yang Benar | Catatan |
-|-----------|-------------------|---------|
-| **URL** | `file:///sdcard/{path}` | Harus ada "sdcard" di path! (dari FDM Monster) |
-| **sequence_id** | `str(int(time.time() * 1000))` | Timestamp string, bukan "0" |
-| **param** | `Metadata/plate_1.gcode` | Path gcode dalam file 3MF |
-| **subtask_name** | Nama file saja | Untuk display di layar printer |
-
-#### ⚠️ Perbedaan Format URL:
-
-| Source | URL Format | Keterangan |
-|--------|------------|------------|
-| **FDM Monster** ✅ | `file:///sdcard/{filename}` | WORKING untuk A1! |
-| **OctoPrint-BambuPrinter (A1/P1)** | `file:///{path}` | Tanpa "sdcard" |
-| **OctoPrint-BambuPrinter (X1/X1C)** | `file:///mnt/sdcard/{path}` | Dengan "mnt" |
-
-#### 📍 File Location di SD Card:
-- File yang di-upload via FTPS: `cache/filename.3mf`
-- File yang di-slice di printer: root folder `filename.3mf`
-
-#### ✅ Test Result:
-```
-POST /api/printer-files/print/cache%2Fadded%20compensation%2C%200.16mm%20layer%2C%202%20walls%2C%2010%25%20infill.3mf
-
-Response: {"status": "success", "message": "Print started from SD card..."}
-Printer: RUNNING ✅ (Heating → Printing)
-```
-
-#### 📝 Files Modified:
-- `src/services/bambu_service.py` - `start_print_from_sd()` function updated
-- `src/api/printer_files.py` - Endpoint `/print/{filename:path}`
-
-#### 🔗 Reference Code:
-- FDM Monster: `src/services/bambu/bambu-mqtt.adapter.ts` → `startPrint()`
-- OctoPrint-BambuPrinter: `octoprint_bambu_printer/printer/states/idle_state.py` → `_get_print_command_for_file()`
-- Home Assistant Bambu Lab: `greghesp/ha-bambulab` → `pybambu/commands.py`
-- OpenBambuAPI: `Doridian/OpenBambuAPI` → `mqtt.md`
-
----
-
-### January 3, 2026 - MQTT Print Command Reference & Troubleshooting 📚
-**Session Focus:** Comprehensive documentation for sending print commands to Bambu Lab printers
-
-#### 📤 Complete MQTT Print Command Reference
-
-##### 1. `project_file` Command (Recommended for 3MF files)
-
-This is the primary command to start printing a sliced 3MF file from SD card:
-
-```python
-# File: src/services/bambu_service.py - start_print_from_sd()
-
-project_command = {
-    "print": {
-        # Required fields
-        "sequence_id": str(int(time.time() * 1000)),  # Unique timestamp
-        "command": "project_file",
-        "param": "Metadata/plate_1.gcode",            # Gcode path inside 3MF
-        "url": "file:///sdcard/filename.3mf",         # SD card URL
-        "subtask_name": "filename.3mf",               # Display name on LCD
-        
-        # IDs (always "0" for local prints)
-        "md5": "",
-        "profile_id": "0",
-        "project_id": "0", 
-        "subtask_id": "0",
-        "task_id": "0",
-        
-        # Print options
-        "bed_type": "auto",           # "auto", "textured_plate", "cool_plate", etc.
-        "timelapse": False,           # Create timelapse video
-        "bed_leveling": True,         # Auto bed leveling before print
-        "flow_cali": False,           # Flow calibration
-        "vibration_cali": False,      # Vibration/resonance calibration
-        "layer_inspect": False,       # First layer inspection
-        
-        # AMS options
-        "use_ams": True,              # Use AMS for filament
-        "ams_mapping": [0]            # Array mapping slicer colors to AMS slots
-    }
-}
-```
-
-##### 2. URL Format by Printer Type
-
-| Printer | URL Format | Example |
-|---------|------------|---------|
-| **A1 / A1 Mini** | `file:///sdcard/{path}` | `file:///sdcard/cache/model.3mf` |
-| **P1P / P1S** | `file:///{path}` | `file:///cache/model.3mf` |
-| **X1 / X1C** | `file:///mnt/sdcard/{path}` | `file:///mnt/sdcard/cache/model.3mf` |
-| **FTP URL** | `ftp:///{path}` | `ftp:///model.3mf` |
-
-##### 3. `param` Field - Gcode Path in 3MF
-
-The `param` field specifies which gcode to use inside the 3MF archive:
-- Single plate: `Metadata/plate_1.gcode`
-- Multi-plate: `Metadata/plate_2.gcode`, `Metadata/plate_3.gcode`, etc.
-
-##### 4. AMS Mapping
-
-The `ams_mapping` array maps slicer filament colors to physical AMS slots:
-```python
-# Example: 4-color print
-"ams_mapping": [0, 1, 2, 3]  # Colors 1-4 → Slots 1-4
-
-# Example: Skip colors (use -1)
-"ams_mapping": [0, -1, 2, -1]  # Color 1→Slot 1, Color 3→Slot 3
-
-# Single color print
-"ams_mapping": [0]  # Use slot 1
-```
-
-#### 📁 3MF File Structure Requirements
-
-A properly sliced 3MF file must contain these files for printer to work correctly:
-
-```
-model.3mf (ZIP archive)
-├── 3D/
-│   └── 3dmodel.model              # 3D model data
-├── Metadata/
-│   ├── plate_1.gcode              # ✅ REQUIRED - Sliced gcode
-│   ├── plate_1.gcode.md5          # MD5 checksum
-│   ├── plate_1.json               # Plate settings (bed type, etc.)
-│   ├── plate_1.png                # ✅ Thumbnail (shown on LCD)
-│   ├── plate_1_small.png          # Small thumbnail
-│   ├── top_1.png                  # Top view
-│   ├── pick_1.png                 # Pick image for object detection
-│   ├── model_settings.config      # Model configuration
-│   ├── slice_info.config          # ✅ Slice metadata (time, weight)
-│   └── project_settings.config    # Project settings
-├── [Content_Types].xml
-└── _rels/.rels
-```
-
-##### `slice_info.config` Contents (Metadata)
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <header>
-    <header_item key="X-BBL-Client-Type" value="slicer"/>
-    <header_item key="X-BBL-Client-Version" value="01.07.08.02"/>
-  </header>
-  <plate>
-    <metadata key="index" value="1"/>
-    <metadata key="prediction" value="1302"/>      <!-- Print time in seconds -->
-    <metadata key="weight" value="10.99"/>          <!-- Filament weight in grams -->
-    <metadata key="timelapse_type" value="0"/>
-    <metadata key="outside" value="false"/>
-    <metadata key="support_used" value="false"/>
-  </plate>
-</config>
-```
-
-#### ⚠️ Known Issue: Thumbnail/Time/Weight Not Showing on Printer LCD
-
-**Problem:** When printing via MQTT `project_file` command, the printer LCD may not show:
-- Thumbnail image
-- Estimated print time
-- Filament weight (grams)
-
-**Root Cause:** 
-The Bambu printer reads metadata (thumbnail, time, weight) directly from the **3MF file itself**, not from the MQTT command. The printer extracts this data from:
-- `Metadata/plate_X.png` → Thumbnail
-- `Metadata/slice_info.config` → Time & weight
-
-**Solutions:**
-
-1. **Ensure file is sliced with OrcaSlicer/Bambu Studio**
-   - Files sliced with these tools contain all required metadata
-   - Avoid manually creating or modifying 3MF archives
-
-2. **Verify 3MF structure before upload**
-   ```python
-   # Use check_3mf_structure.py to verify
-   python check_3mf_structure.py
-   
-   # Should show:
-   # 🔧 Metadata/plate_1.gcode (1,486,275 bytes) <-- GCODE
-   # 🖼️ Metadata/plate_1.png (21,870 bytes) <-- THUMBNAIL
-   ```
-
-3. **Check slice_info.config has prediction and weight**
-   ```xml
-   <metadata key="prediction" value="1302"/>  <!-- Time in seconds -->
-   <metadata key="weight" value="10.99"/>     <!-- Weight in grams -->
-   ```
-
-4. **Known limitation:** For LAN mode prints started via MQTT, some metadata display features may be limited compared to prints started from Bambu Studio directly.
-
-#### 🔧 Troubleshooting Print Command Errors
-
-##### Error: "Print command failed"
-
-| Symptom | Cause | Solution |
-|---------|-------|----------|
-| File not found | Wrong URL path | Check file exists in SD card, use correct path prefix |
-| Printer busy | Already printing | Wait for current job or send stop command first |
-| Invalid gcode path | Wrong `param` value | Use `Metadata/plate_1.gcode` format |
-| AMS error | Wrong ams_mapping | Check slot numbers match loaded filaments |
-
-##### Error: "sequence_id" issues
-
-```python
-# ❌ WRONG - Static sequence_id
-"sequence_id": "0"
-
-# ✅ CORRECT - Unique timestamp
-"sequence_id": str(int(time.time() * 1000))
-```
-
-##### Error: File in cache vs root
-
-| Location | Path in URL | When |
-|----------|-------------|------|
-| Root `/` | `file:///sdcard/model.3mf` | Sliced directly on printer |
-| Cache `/cache/` | `file:///sdcard/cache/model.3mf` | Uploaded via FTPS/Studio |
-
-##### Debug: Check file exists on SD card
-
-```python
-# Use FTPS to list files
-python explore_sd_card.py
-
-# Or via API
-GET /api/printer-files
-```
-
-#### 📊 MQTT Topics for Bambu Lab
-
-| Topic | Direction | Purpose |
-|-------|-----------|---------|
-| `device/{printer_id}/request` | Client → Printer | Send commands |
-| `device/{printer_id}/report` | Printer → Client | Receive status |
-
-#### 🔄 Print Control Commands
-
-```python
-# Pause print
-{"print": {"sequence_id": "0", "command": "pause"}}
-
-# Resume print  
-{"print": {"sequence_id": "0", "command": "resume"}}
-
-# Stop/Cancel print
-{"print": {"sequence_id": "0", "command": "stop"}}
-
-# Send raw G-code
-{"print": {"sequence_id": "0", "command": "gcode_line", "param": "G28 X Y\n"}}
-```
-
-#### 📝 Implementation Reference
-
-**Backend file:** `src/services/bambu_service.py`
-```python
-def start_print_from_sd(self, filename: str, plate_number: int = 1, 
-                        use_ams: bool = True, ams_mapping = None) -> bool:
-    """
-    Start printing a file from printer's SD card
-    
-    Args:
-        filename: File path on SD card (e.g., "cache/model.3mf")
-        plate_number: Which plate to print (1-4)
-        use_ams: Whether to use AMS for filament
-        ams_mapping: List mapping slicer colors to AMS slots
-    
-    Returns:
-        bool: True if command sent successfully
-    """
-```
-
-**API Endpoint:** `src/api/printer_files.py`
-```python
-@router.post("/print/{filename:path}")
-async def start_print_from_sd_card(filename: str, plate: int = 1):
-    """
-    Start print from SD card file
-    
-    - filename: URL-encoded path (e.g., cache%2Fmodel.3mf)
-    - plate: Plate number (default 1)
-    """
-```
-
----
-
-### December 30, 2025 - UI/UX Enhancement Session
-**Session Focus:** Improve user feedback for file operations and implement visual progress indicators
-
-#### ✅ Completed:
-
-1. **Enhanced Upload Success Messages** (`src/api/jobs.py` + `frontend/src/components/QueueDashboard.tsx`)
-   - Added file size display in MB (calculated from file bytes)
-   - Display printer name in success message
-   - Show job ID for reference
-   - Added emoji indicators (📤, ✅) for visual clarity
-   - Example output: `"✅ Successfully uploaded 'model.3mf' (5.23MB) - Added to Bambu Lab A1 queue (Job #3)"`
-   
-   **Backend Changes:**
-   ```python
-   file_size_mb = len(content) / (1024 * 1024)
-   logger.info(f"📤 Uploaded file: {filename}, size: {file_size_mb:.2f} MB")
-   logger.info(f"✅ Job created successfully: job_id={job_response.job_id}, name={job_response.job_name}, loops={loop_count}, size={file_size_mb:.2f}MB")
-   ```
-   
-   **Frontend Changes:**
-   ```typescript
-   const fileSizeMB = (selectedFile.size / (1024 * 1024)).toFixed(2);
-   const printerName = printers.find(p => p.printerId === selectedUploadPrinter)?.printerName || 'printer';
-   setMessage({ 
-       type: 'success', 
-       text: `✅ Successfully uploaded "${job.jobName}" (${fileSizeMB}MB) - Added to ${printerName} queue (Job #${job.jobId})` 
-   });
-   ```
-
-2. **Enhanced Delete Messages with Location Awareness** (`src/services/ftps_service.py` + `src/api/printer_files.py` + `frontend/src/components/PrinterFilesTab.tsx`)
-   - Added location detection (root directory vs cache directory)
-   - Display file location in delete messages
-   - Enhanced logging with directory information
-   - Added location emoji indicators (📁 root/, 📂 cache/)
-   - Example output: `"🗑️ Successfully deleted: 📂 cache/model.3mf"`
-   
-   **FTPS Service Enhancement:**
-   ```python
-   def delete_file(self, remote_filename: str) -> bool:
-       location = "cache directory" if remote_filename.startswith("cache/") else "root directory"
-       logger.info(f"🗑️ Deleting file from {location}: {remote_filename}")
-       self.ftp.delete(remote_filename)
-       logger.info(f"✅ Successfully deleted from SD card ({location}): {remote_filename}")
-       return True
-   ```
-   
-   **API Response Enhancement:**
-   ```python
-   location = "cache" if filename.startswith("cache/") else "root"
-   display_name = filename.split("/")[-1]
-   return {
-       "status": "success",
-       "message": f"Successfully deleted from {location} directory: {display_name}",
-       "filename": filename,
-       "location": location,
-       "display_name": display_name
-   }
-   ```
-   
-   **Frontend Display:**
-   ```typescript
-   const location = data.location || (fileToDelete.includes('/') ? 'cache' : 'root');
-   const locationLabel = location === 'cache' ? '📂 cache/' : '📁 root/';
-   const successMsg = `🗑️ Successfully deleted: ${locationLabel}${filename}`;
-   ```
-
-3. **Upload Progress Bar Implementation** (`frontend/src/api/client.ts` + `frontend/src/components/QueueDashboard.tsx`)
-   - Real-time upload progress tracking using Axios onUploadProgress
-   - Visual progress bar with percentage display (0-100%)
-   - Color transition: Blue (uploading) → Green (complete)
-   - Dynamic status text: "📤 Uploading file to server..." → "✓ Processing..."
-   - Smooth animations and transitions
-   
-   **API Client Update:**
-   ```typescript
-   async uploadJob(file: File, loopCount: number, onProgress?: (percent: number) => void): Promise<JobResponse> {
-       const response = await this.apiClient.post('/jobs/upload', formData, {
-           headers: { 'Content-Type': 'multipart/form-data' },
-           onUploadProgress: (progressEvent) => {
-               if (progressEvent.total && onProgress) {
-                   const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-                   onProgress(percentCompleted);
-               }
-           },
-       });
-       return transformedJobResponse;
-   }
-   ```
-   
-   **Progress Bar UI:**
-   ```tsx
-   const [uploadProgress, setUploadProgress] = useState(0);
-   
-   // Upload with progress callback
-   const job = await printFarmClient.uploadJob(selectedFile, loopCount, (percent) => {
-       setUploadProgress(percent);
-   });
-   
-   // Progress bar component
-   {isUploading && (
-       <div style={{ marginTop: '16px' }}>
-           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-               <span style={{ fontSize: '13px', color: '#6b7280', fontWeight: 500 }}>Uploading...</span>
-               <span style={{ fontSize: '13px', color: '#2563eb', fontWeight: 600 }}>{uploadProgress}%</span>
-           </div>
-           <div style={{ width: '100%', height: '8px', backgroundColor: '#e5e7eb', borderRadius: '4px', overflow: 'hidden' }}>
-               <div style={{
-                   width: `${uploadProgress}%`,
-                   height: '100%',
-                   backgroundColor: uploadProgress === 100 ? '#10b981' : '#2563eb',
-                   transition: 'width 0.3s ease, background-color 0.3s ease',
-                   borderRadius: '4px'
-               }} />
-           </div>
-           <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
-               {uploadProgress < 100 ? '📤 Uploading file to server...' : '✓ Processing...'}
-           </div>
-       </div>
-   )}
-   ```
-
-4. **Queue Management**
-   - Cleared queue using `clear_queue.py` utility
-   - Removed 2 pending jobs from database
-   - Database reset to clean state (0 jobs)
-
-5. **Server Restart Workflow Standardization**
-   - Established mandatory restart procedure:
-     1. Kill all Python and Node.js processes
-     2. Execute `start.bat` to launch all services
-   - **CRITICAL WORKFLOW**: Must always follow this sequence
-   - Commands:
-     ```powershell
-     taskkill /F /IM python.exe 2>$null
-     taskkill /F /IM node.exe 2>$null
-     Start-Sleep 3
-     cd "c:\Users\GIGABYTE\Documents\3d Print farm\cooking-ai-agent"
-     .\start.bat
-     ```
-   - Successfully restarted services:
-     - Backend: Running on port 5000 ✅
-     - Frontend: Running on port 3000 ✅
-
-#### 🎯 Key Improvements:
-
-**User Experience:**
-- Upload operations now provide comprehensive feedback (file size, printer, job ID)
-- Delete operations show file location context (root vs cache)
-- Visual progress bar provides real-time upload feedback
-- Emoji indicators improve message scannability
-- Color-coded progress states (blue → green) for visual confirmation
-
-**Code Quality:**
-- Consistent emoji usage across backend logs and frontend messages
-- Proper metadata passing from backend to frontend
-- Reusable progress callback pattern for future features
-- Location-aware file operations for better context
-
-**System Stability:**
-- Standardized server restart workflow prevents port conflicts
-- Clean process termination before restart
-- Documented procedure for consistent operations
-
-#### 📊 Test Results:
-
-**Manual Testing:**
-- ✅ Upload with progress bar: Visual feedback working correctly
-- ✅ Upload success message: Shows file size, printer name, job ID
-- ✅ Delete from root directory: Shows "📁 root/filename"
-- ✅ Delete from cache: Shows "📂 cache/filename"
-- ✅ Progress bar color transition: Blue → Green at 100%
-- ✅ Status text changes: "Uploading..." → "Processing..."
-- ✅ Server restart: All processes killed, services restarted successfully
-
-**Performance:**
-- Progress bar updates smoothly (no lag)
-- Messages display instantly after operations
-- No performance degradation from enhancements
-
-#### 🔜 Next Steps:
-- User validation of enhanced messages in real workflow
-- Test progress bar with larger files (>100MB)
-- Consider adding progress bar for delete operations
-- Add error state indicators to progress bar
-- Implement similar feedback for print operations
-
-#### 📝 Modified Files:
-```
-Backend:
-├── src/api/jobs.py                 (Upload message enhancement)
-├── src/api/printer_files.py        (Delete response with location metadata)
-└── src/services/ftps_service.py    (Delete logging with location)
-
-Frontend:
-├── src/api/client.ts               (Upload progress callback support)
-├── src/components/QueueDashboard.tsx    (Progress bar + upload messages)
-└── src/components/PrinterFilesTab.tsx   (Location-aware delete messages)
-
-Scripts:
-└── clear_queue.py                  (Executed to clear database)
-```
-
----
-
-### December 30, 2025 - Direct FTPS Upload Implementation
-**Session Focus:** Implement direct SD card upload without HTTP server
-
-#### ✅ Completed:
-
-1. **FTPS Direct Upload Service** (`src/services/ftps_service.py`)
-   - `SimpleFTPSClient` - Core FTPS client with implicit SSL/TLS
-   - `BambuFTPSClient` - Wrapper for easy use
-   - `BambuDirectUploadService` - High-level upload service
-   - Features:
-     - Implicit FTPS connection (port 990)
-     - Binary file transfer with chunked uploads (64KB blocks)
-     - Progress callback support
-     - SSL certificate validation disabled (self-signed printer certs)
-     - Context manager support for safe connections
-
-2. **Integration with MQTT** (`src/services/bambu_service.py`)
-   - New method: `send_print_file_direct()`
-   - Workflow:
-     1. Upload file via FTPS to printer SD card
-     2. Wait 1 second for printer to register
-     3. Send MQTT start command
-   - Tested and working!
-
-3. **API Endpoint** (`src/api/jobs.py`)
-   - `POST /api/jobs/upload-direct/{job_id}/print`
-   - Handles job lookup, file verification, and direct upload
-   - Returns success message with method confirmation
-
-4. **Test Suite** (`test_direct_upload.py`)
-   - Test 1: FTPS Connection ✅ PASS
-   - Test 2: MQTT Connection ✅ PASS
-   - Test 3: Direct Upload + Print ✅ PASS
-   - Full end-to-end workflow validated
-
-#### Test Results:
-```
-FTPS Connection......................... ✅ PASS
-MQTT Connection......................... ✅ PASS
-Direct Upload + Print................... ✅ PASS
-
-✅ All tests passed!
-```
-
-#### Key Achievements:
-- ✅ Port 990 FTPS connection successful
-- ✅ File upload to printer SD card verified
-- ✅ MQTT start command integration working
-- ✅ No HTTP server required
-- ✅ Full automation pipeline functional
-
-#### Code Example - Direct Upload:
-```python
-# Upload file directly and start print
-PRINTER_IP = "192.168.4.101"
-ACCESS_CODE = "34782589"
-
-mqtt_client = BambuLabMQTTClient(
-    printer_id="03900D5A2402051",
-    printer_ip=PRINTER_IP,
-    access_code=ACCESS_CODE,
-    use_lan_mode=True
-)
-
-mqtt_client.connect()
-
-# Direct FTPS upload + MQTT print
-success = mqtt_client.send_print_file_direct("model.3mf")
-
-if success:
-    print("✅ Upload successful, print started!")
-    # Check printer LCD to see print starting
-```
-
----
-
-### December 30, 2025 - Earlier Sessions
-**Session Focus:** Printer Integration Testing
-
-#### ✅ Completed:
-1. **MQTT LAN Mode Connection**
-   - Switched from Cloud API to LAN mode
-   - Connected via `192.168.4.101:8883` with TLS
-   - Username: `bblp`, Password: Access Code
-   - Status push working - receiving printer telemetry
-
-2. **Auto-Eject Feature**
-   - Endpoint: `POST /api/print-control/{printer_id}/eject`
-   - G-code sequence: `G28 X Y` → `G1 Y 230 F6000` → `M400`
-   - **Tested & Working!** Printer moves bed forward for easy part removal
-
-3. **Print Control API**
-   - Start print: `POST /api/print-control/{printer_id}/start-print`
-   - Pause/Resume/Stop endpoints functional
-   - Queue integration working
-
-4. **WebSocket Real-time Updates**
-   - Backend: `src/api/websocket.py` with ConnectionManager
-   - Frontend: `useWebSocket.ts` hook
-   - Broadcasts printer status changes
-
-5. **Frontend Dashboard**
-   - Tabbed interface: Status | Queue | Upload | History
-   - Components: Dashboard, QueueDashboard, HistoryViewer, JobUploadForm
-   - Clean modern UI with Tailwind CSS
-
-6. **Camera Integration**
-   - Live MJPEG stream from printer camera
-   - Endpoints: `/api/camera/snapshot`, `/api/camera/stream`
-   - Printer info display: Model, serial number, IP, access code
-   - Auto-refresh with 500ms polling
-
-#### ⚠️ Known Issues (RESOLVED):
-1. **FTP Upload Not Available (FIXED)**
-   - Bambu A1 port 990 (FTPS) in LAN mode uses implicit TLS
-   - **Solution**: Implemented proper FTPS client with implicit SSL wrapping
-   - Result: Direct FTPS upload now working perfectly ✅
-
-2. **HTTP Server Alternative (Still Available)**
-   - If FTPS fails for any reason, HTTP server method available as fallback
-   - Backend serves files via `/uploads` endpoint at port 5000
-
-#### 🔜 Next Steps:
-1. Test HTTP camera streaming from outside network
-2. Implement loop counter for repeated prints
-3. Auto-eject integration with job queue
-4. Printer status monitoring improvements
-5. Multi-printer scalability
-
----
-
-## ✨ Recent Session Accomplishments
-
-### Direct FTPS Upload - Technical Implementation
-
-**Architecture:**
-```
-User uploads file
-    ↓
-Database stores job reference
-    ↓
-POST /api/jobs/upload-direct/{job_id}/print
-    ↓
-Backend retrieves file path from job_id
-    ↓
-FTPS Client connects to 192.168.4.101:990
-    ↓
-Implicit SSL/TLS wrap socket
-    ↓
-Authenticate: username="bblp", password=access_code
-    ↓
-Binary upload with chunked transfer
-    ↓
-Monitor progress via callback
-    ↓
-MQTT start command sent
-    ↓
-Printer begins print immediately
-```
-
-**File: `src/services/ftps_service.py`**
-```python
-class SimpleFTPSClient:
-    """Pure socket-based FTPS with implicit SSL"""
-    - connect() - Establish FTPS connection
-    - upload_file() - Transfer file with progress tracking
-    - _send_command() - FTP command execution
-    - Context manager support
-
-class BambuFTPSClient:
-    """Wrapper for easier usage"""
-    
-class BambuDirectUploadService:
-    """High-level service interface"""
-    - upload_to_sd() - Simple method for uploads
-```
-
-**File: `src/services/bambu_service.py`**
-```python
-def send_print_file_direct(self, file_path: str) -> bool:
-    """
-    Step 1: Upload file via FTPS to printer
-    Step 2: Wait 1 second
-    Step 3: Send MQTT start command
-    
-    Returns: True if successful
-    """
-```
-
-**File: `src/api/jobs.py`**
-```python
-@router.post("/upload-direct/{job_id}/print")
-async def upload_and_print_direct(job_id: int):
-    """
-    1. Look up job by ID
-    2. Get file path from database
-    3. Call mqtt_client.send_print_file_direct()
-    4. Return result
-    """
-```
-
-### Performance Metrics
-
-| Operation | Time | Status |
-|-----------|------|--------|
-| FTPS connect | ~1 second | ✅ |
-| File upload (280 bytes) | ~2 seconds | ✅ |
-| Upload progress callback | Real-time | ✅ |
-| MQTT start command | Instant | ✅ |
-| Total end-to-end | ~3-5 seconds | ✅ |
-
-### File Structure
-```
-src/services/
-├── bambu_service.py        (MQTT + send_print_file_direct method)
-├── ftps_service.py         (NEW - FTPS client implementation)
-├── job_service.py
-└── ...
-
-src/api/
-├── jobs.py                 (New endpoint: upload-direct/{job_id}/print)
-└── ...
-
-tests/
-├── test_direct_upload.py   (NEW - Full test suite)
-└── ...
-
-Documentation:
-├── README.md               (This file - updated)
-└── DIRECT_UPLOAD.md        (Detailed technical docs)
-```
-
-### Testing & Validation
-
-**All 3 Tests Passing:**
-```
-✅ Test 1: FTPS Connection
-   - Connect to 192.168.4.101:990
-   - Implicit SSL/TLS wrapping
-   - User authentication
-   
-✅ Test 2: MQTT Connection  
-   - Connect to 192.168.4.101:8883
-   - Retrieve printer status
-   - Verify online status
-   
-✅ Test 3: Direct Upload + Print
-   - End-to-end workflow
-   - FTPS file transfer
-   - MQTT start command
-   - Monitor progress
-```
-
-**Run Tests:**
-```bash
-cd cooking-ai-agent
-python test_direct_upload.py
-# Or with auto-test mode:
-$env:AUTO_TEST='true'; python test_direct_upload.py
-```
-
----
-
-## 📝 Changelog
-
-### January 7, 2026 - Filament Temperature Override & Placeholder Fix
-
-#### ✅ Completed Changes
-
-**1. Filament Profile Temperature Override**
-- Added `filament_id` parameter throughout the queue processing pipeline
-- Queue items now store `filament_id` from selected AMS slot assignment
-- Backend fetches filament profile from database and uses temperatures for G-code processing
-- Files: `src/services/queue_service.py`, `src/api/queue.py`
-
-**2. OrcaSlicer Placeholder Replacement**
-- Fixed `{filament_already_loaded}` placeholder not being replaced in template mode
-- Modified `_replace_filament_variables()` to accept `print_settings` parameter
-- Added replacement: `{filament_already_loaded}` → `1` (skip flush) or `0` (do flush)
-- Both template mode and section toggle mode now properly replace placeholders
-- File: `src/services/gcode_preprocessor.py`
-
-**3. Frontend Filament ID Passing**
-- Added `filament_id` field to `AmsTray` interface
-- Slot assignments now store `filament_id` when merged with AMS trays
-- `handleAddToQueue` now looks up `filament_id` from selected slot and sends to API
-- Files: `frontend/src/components/QueueDashboard.tsx`, `frontend/src/api/client.ts`
-
-**4. Block Preservation in Template Mode**
-- Template processing now preserves HEADER_BLOCK, CONFIG_BLOCK, and filament footer
-- Original OrcaSlicer metadata comments maintained in output files
-- Print layers section preserved without modification
-- File: `src/services/gcode_templates.py`
-
-#### 🔄 Known Issues / To-Do
-
-**1. AMS Extruder Display Shows "External Spool"**
-- UI shows "External Spool" even when AMS filament is loaded
-- Backend returns correct `tray_now` value (e.g., 3)
-- Possible frontend state/caching issue
-- Workaround: Hard refresh (Ctrl+F5) after slot changes
-
-**2. Temperature Placeholders in Comment Headers**
-- Comment lines like `; change_filament_gcode = ...` still contain raw placeholders
-- These are metadata comments, NOT executed G-code
-- Actual temperature commands (M104, M109, M140) are correctly set
-- Low priority - cosmetic only
-
-**3. File Naming Convention**
-- Output files still named based on original file (e.g., `PLA-CF_20m55s.gcode.3mf`)
-- Doesn't reflect the selected filament type
-- Enhancement: Rename output based on selected filament
-
-#### 📋 Testing Checklist
-
-- [ ] Upload 3MF file with PLA-CF preset
-- [ ] Select Slot 4 (eSUN PLA+ Red, 215°C nozzle, 60°C bed)
-- [ ] Check "Filament Already Loaded"
-- [ ] Select "Quick Print" preset
-- [ ] Add to Queue
-- [ ] Verify output file has:
-  - [ ] `M109 S215` (not S230)
-  - [ ] `M140 S60` (not S55)
-  - [ ] `M1002 set_filament_type:PLA+` (not PLA-CF)
-  - [ ] `M622 J1` (filament_already_loaded = 1)
-
----
-
-#### Bambu Lab A1 Combo AMS
-```
-Printer IP:      192.168.4.101
-Printer Serial:  03900D5A2402051
-Access Code:     34782589
-MQTT Port:       8883 (TLS)
-FTPS Port:       990 (Implicit SSL)
-MQTT Username:   bblp
-Mode:            LAN Mode (local network only)
-```
-
-#### Connection Status (Dec 30, 2025 - Latest)
-- ✅ MQTT Connection: Working
-- ✅ Status Push: Receiving printer status
-- ✅ Auto-Eject: Working (G28 X Y + G1 Y 230)
-- ✅ Print Start Command: API responds successfully
-- ✅ **Direct FTPS Upload: NOW WORKING!** (NEW)
-- ✅ Camera Streaming: Live MJPEG feed available
-- ✅ HTTP File Serving: Available as fallback
-
----
+**Made with ❤️ for Bambu Lab A1 Combo AMS**
