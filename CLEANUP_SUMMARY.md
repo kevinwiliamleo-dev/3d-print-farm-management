@@ -4,7 +4,7 @@
 
 ---
 
-## ✅ Files Deleted (Priority 1)
+## Phase 1: File Deletion (Priority 1)
 
 ### Test Files Using Deprecated HTTP Method (3 files)
 - ❌ `tests/test_direct_print.py` - Used deprecated `send_print_file()`
@@ -45,20 +45,47 @@
 
 ---
 
+## Phase 2: Code Flow Cleanup (~175 lines removed)
+
+### API Endpoints Removed
+- ❌ `src/api/jobs.py` - `upload_and_print_direct()` endpoint (~60 lines)
+  - **Reason:** No frontend usage, bypassed queue system, deprecated workflow
+
+### Service Layer Removed
+- ❌ `src/services/bambu_service.py` - `send_print_file_direct()` (~70 lines)
+  - **Reason:** Only called by removed endpoint, unused in production flow
+  
+- ❌ `src/services/ftps_service.py` - `BambuDirectUploadService` class (~45 lines)
+  - **Reason:** Wrapper class added unnecessary abstraction, direct client usage preferred
+
+### Test Files Removed
+- ❌ `tests/test_print_flow.py` - Used old queue start endpoint
+
+**Impact:** Consolidated to single production flow:
+```
+Upload → Queue → Print Control Service
+(No more bypassing queue system)
+```
+
+---
+
 ## 📊 Cleanup Statistics
 
-| Metric | Count |
-|--------|-------|
-| Files Deleted | 15 |
-| Lines of Code Removed | ~2,457 |
-| Storage Saved | ~60 KB |
-| Test Coverage Impact | None (deprecated tests) |
-| Production Code Impact | None |
+| Metric | Phase 1 (Files) | Phase 2 (Code) | Total |
+|--------|----------------|----------------|-------|
+| Files Deleted | 15 | 1 | 16 |
+| Lines of Code Removed | ~2,457 | ~175 | ~2,632 |
+| Functions/Classes Removed | - | 3 | 3 |
+| API Endpoints Removed | - | 1 | 1 |
+| Storage Saved | ~60 KB | ~5 KB | ~65 KB |
+| Test Coverage Impact | None (deprecated tests) | None (unused flow) | None |
+| Production Impact | None | None | None |
 
 ---
 
 ## 🔍 Verification Performed
 
+### Phase 1 Verification
 ✅ **No imports in production code**
 - Verified no files in `src/` import deleted files
 - Verified no active API endpoints use deleted functions
@@ -70,6 +97,21 @@
 ✅ **Test suite still functional**
 - Active FTPS tests remain: `test_direct_upload.py`, `test_simple_upload_print.py`
 - All production workflows unaffected
+
+### Phase 2 Verification
+✅ **Frontend usage check (grep_search)**
+- Confirmed `upload-direct` endpoint: 0 frontend calls
+- Confirmed `send_print_file_direct()`: 0 production calls
+
+✅ **Flow analysis**
+- Documented complete active flow in FLOW_ANALYSIS.md
+- Verified all frontend components use standard flow only
+- No references to removed endpoint in React components
+
+✅ **Service layer consolidation**
+- print_control_service now uses BambuFTPSClient directly
+- Removed unnecessary wrapper class (BambuDirectUploadService)
+- Single source of truth for FTPS uploads
 
 ---
 
