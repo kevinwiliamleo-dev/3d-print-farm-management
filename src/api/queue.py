@@ -36,6 +36,9 @@ class AddToQueueRequest(BaseModel):
     # Template mode (NEW - RECOMMENDED)
     use_template_mode: bool = Field(default=True, description="Replace all start/end gcode with optimized templates")
     
+    # Processing bypass (NEW - SIMPLE MODE)
+    skip_preprocessing: bool = Field(default=False, description="Skip ALL G-code preprocessing - print file as-is")
+    
     # Filament profile (optional - for temperature overrides)
     filament_id: Optional[int] = None
     
@@ -48,7 +51,7 @@ class AddToQueueRequest(BaseModel):
     clean_nozzle: bool = Field(default=True, description="Enable nozzle cleaning")
     wipe_nozzle: bool = Field(default=True, description="Enable wipe nozzle section (contains M109 S140 wait)")
     nozzle_load_line: bool = Field(default=True, description="Enable nozzle purge line at front of bed")
-    timelapse: bool = Field(default=False, description="Enable timelapse recording during print")
+    timelapse: bool = Field(default=True, description="Enable timelapse recording during print")
     auto_eject: bool = Field(default=False, description="Auto push-off after print")
     cooldown_temp: int = Field(default=32, ge=25, le=50, description="Bed temp before eject")
     startup_sound: bool = Field(default=True, description="Play startup melody")
@@ -218,6 +221,7 @@ async def add_job_to_queue(
             use_ams=request.use_ams,
             filament_already_loaded=request.filament_already_loaded,
             use_template_mode=request.use_template_mode,  # NEW: Template mode
+            skip_preprocessing=request.skip_preprocessing,  # NEW: Bypass processing
             filament_id=request.filament_id,
             # Automation settings (from preset or request)
             start_machine=start_machine,

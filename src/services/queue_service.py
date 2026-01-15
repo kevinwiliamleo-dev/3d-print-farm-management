@@ -33,6 +33,7 @@ class QueueService:
         use_ams: bool = True,
         filament_already_loaded: bool = False,
         use_template_mode: bool = True,  # NEW: Template mode (recommended)
+        skip_preprocessing: bool = False,  # NEW: Skip ALL preprocessing (print as-is)
         # Automation settings
         filament_id: int = None,
         start_machine: bool = True,
@@ -112,7 +113,16 @@ class QueueService:
         
         # Copy and modify the file based on automation settings
         queue_file_path_str = None
-        if source_file.exists() and source_file.suffix.lower() == '.3mf':
+        
+        # Skip file modification if bypass enabled
+        if skip_preprocessing:
+            logger.info(f"⏭️ Skipping file preprocessing (bypass enabled - using original file)")
+            # Just copy original file without modifications
+            if source_file.exists():
+                shutil.copy(source_file, queue_file_path)
+                queue_file_path_str = str(queue_file_path)
+                logger.info(f"✅ Using original file: {queue_file_path_str}")
+        elif source_file.exists() and source_file.suffix.lower() == '.3mf':
             try:
                 queue_file_path_str = self._create_modified_queue_file(
                     source_file=source_file,
@@ -176,6 +186,8 @@ class QueueService:
             ams_mapping=ams_mapping,
             use_ams=use_ams,
             filament_already_loaded=filament_already_loaded,
+            use_template_mode=use_template_mode,
+            skip_preprocessing=skip_preprocessing,
             # Automation settings
             filament_id=filament_id,
             auto_bed_leveling=auto_bed_leveling,

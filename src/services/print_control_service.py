@@ -272,15 +272,20 @@ class PrintControlService:
                 return False
             
             # ==================== G-CODE PREPROCESSING ====================
-            # Apply automation settings before uploading to printer
-            # This removes nozzle_load_line section (purge line at front of bed) when disabled
-            logger.info(f"🔧 Applying print farm automation settings...")
-            try:
-                file_path = self._preprocess_gcode_file(file_path, queue_item)
-                logger.info(f"✅ Preprocessing complete, using: {file_path}")
-            except Exception as preproc_err:
-                logger.warning(f"⚠️ Preprocessing failed, using original file: {preproc_err}")
-                # Continue with original file
+            # Skip preprocessing if bypass flag is set
+            if queue_item.skip_preprocessing:
+                logger.info(f"⏭️ Skipping G-code preprocessing (bypass enabled)")
+                print_log(f"Using original file without modifications", "INFO")
+            else:
+                # Apply automation settings before uploading to printer
+                # This removes nozzle_load_line section (purge line at front of bed) when disabled
+                logger.info(f"🔧 Applying print farm automation settings...")
+                try:
+                    file_path = self._preprocess_gcode_file(file_path, queue_item)
+                    logger.info(f"✅ Preprocessing complete, using: {file_path}")
+                except Exception as preproc_err:
+                    logger.warning(f"⚠️ Preprocessing failed, using original file: {preproc_err}")
+                    # Continue with original file
             
             # Upload file to printer SD card via FTPS
             logger.info(f"📤 Uploading file to printer SD card: {file_path}")

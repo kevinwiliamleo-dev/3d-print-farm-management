@@ -124,6 +124,9 @@ class Queue(Base):
     pre_extrude = Column(Boolean, default=True)         # Add pre-extrude command before print
     pre_extrude_length = Column(Float, default=2.2)     # Length to extrude in mm
     
+    # Processing bypass option
+    skip_preprocessing = Column(Boolean, default=False)  # Skip ALL G-code preprocessing (print file as-is)
+    
     # Modified file path - stores the queue-specific modified 3MF file
     # This is the actual file that will be printed (with G-code modifications applied)
     queue_file_path = Column(String(500), nullable=True)  # Path to modified 3MF in queue_files/
