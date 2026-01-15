@@ -291,65 +291,6 @@ async def get_job_details(job_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error fetching job: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/upload-direct/{job_id}/print")
-async def upload_and_print_direct(job_id: int, db: Session = Depends(get_db)):
-    """
-    Upload file directly to printer SD card and start print
-    
-    Direct FTPS method (no HTTP server needed):
-    1. Upload file via FTPS port 990 to printer
-    2. Send MQTT start command
-    
-    Args:
-        job_id: Job ID with uploaded file
-        
-    Returns: Success message and print status
-    """
-    try:
-        from src.services.bambu_service import get_bambu_mqtt_client
-        
-        job_service = JobService(db)
-        job = job_service.get_job_by_id(job_id)
-        
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Job not found: job_id={job_id}")
-        
-        # Get file path - use filename (original upload name with extension)
-        file_path = UPLOAD_DIR / job.filename
-        
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {job.filename}")
-        
-        logger.info(f"🚀 DIRECT UPLOAD: Starting for job_id={job_id}, file={job.filename}")
-        
-        # Get MQTT client and send direct upload command
-        mqtt_client = get_bambu_mqtt_client()
-        
-        if not mqtt_client.is_printer_online():
-            raise HTTPException(status_code=503, detail="Printer is offline")
-        
-        # Send direct upload + start print
-        success = mqtt_client.send_print_file_direct(str(file_path))
-        
-        if success:
-            job_service.update_job_status(job_id, "printing")
-            return {
-                "message": "Direct upload successful, print started",
-                "job_id": job_id,
-                "file": job.job_name,
-                "method": "FTPS direct upload"
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Direct upload failed")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in direct upload/print: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.delete("/{job_id}")
 async def delete_job(job_id: int, db: Session = Depends(get_db)):
     """Delete job by job_id"""
