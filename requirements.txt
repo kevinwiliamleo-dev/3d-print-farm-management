@@ -1,0 +1,30 @@
+# Core Framework - Minimal compatible versions
+fastapi
+uvicorn
+starlette
+pydantic
+python-multipart
+
+# Database
+sqlalchemy
+alembic
+
+# File Handling
+python-dotenv
+aiofiles
+
+# MQTT Communication
+paho-mqtt
+
+# HTTP Requests
+requests
+aiohttp
+
+# Utilities
+python-json-logger
+
+# Development & Testing
+pytest
+black
+flake8
+watchfiles

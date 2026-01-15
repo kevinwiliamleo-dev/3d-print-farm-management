@@ -1,0 +1,79 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data & Uploads
+data/uploads/*
+!data/uploads/.gitkeep
+data/gcode/*
+!data/gcode/.gitkeep
+data/3mf_input/*
+!data/3mf_input/.gitkeep
+data/3mf_output/*
+!data/3mf_output/.gitkeep
+data/queue_files/*
+!data/queue_files/.gitkeep
+data/temp_compare/*
+!data/temp_compare/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Virtual Environment
+venv_clean/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# IDE Extensions
+.env.code-workspace
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
