@@ -554,36 +554,54 @@ cooking-ai-agent/
 
 ## 📡 File Transfer to Printer
 
-### Quick Reference Table
+### 🎯 Current Implementation (Active)
 
-| Step | Action | File/Endpoint | Notes |
-|------|--------|--------------|-------|
-| 1 | Upload to printer | FTPS port 990 | `cache/` folder |
-| 2 | Start print | MQTT `project_file` | Use `file:///sdcard/` URL |
+**System uses FTPS Direct Upload method exclusively** - This is the ONLY method used in production.
+
+| Step | Action | Implementation | Notes |
+|------|--------|---------------|-------|
+| 1 | Upload to printer | FTPS port 990 → `cache/` folder | `print_control_service.py` |
+| 2 | Start print | MQTT `start_print_from_sd()` | `bambu_service.py` |
 | 3 | Monitor progress | WebSocket `/ws` | Real-time status |
-| 4 | Control print | MQTT pause/resume/stop | Database sync required |
+| 4 | Control print | MQTT pause/resume/stop | Database sync |
 
-### Method 1: Direct FTPS Upload (RECOMMENDED) ✅
+### ✅ **FTPS Direct Upload (ACTIVE METHOD)**
 
-**Advantages:**
-- No HTTP server needed
-- Direct file transfer to printer SD card
-- Faster and simpler
-- Based on OctoPrint-BambuPrinter plugin implementation
+**Used By:**
+- ✅ `print_control_service.py` - `start_next_job()` (Main Queue System)
+- ✅ `queue_service.py` - All queue operations
+- ✅ All production workflows
+
+**Why This Method:**
+- ✅ No HTTP server dependency
+- ✅ Direct file transfer to printer SD card
+- ✅ Faster and more reliable
+- ✅ Progress callback integrated with WebSocket
+- ✅ Based on OctoPrint-BambuPrinter plugin
+- ✅ Tested and stable
+
+**How It Works:**
+```
+1. Upload via FTPS (port 990) → Printer SD card `/cache/`
+2. Send MQTT: start_print_from_sd(filename="model.3mf")
+3. Printer prints from SD card file
+```
 
 **Implementation:**
 ```python
-from src.services.bambu_service import BambuLabMQTTClient
+from src.services.ftps_service import BambuFTPSClient
 
-mqtt_client = BambuLabMQTTClient(
-    printer_id="03900D5A2402051",
-    printer_ip="192.168.4.101",
-    access_code="34782589",
-    use_lan_mode=True
+ftps_client = BambuFTPSClient(
+    host="192.168.4.101",
+    access_code="34782589"
 )
 
-# Direct FTPS upload + print
-success = mqtt_client.send_print_file_direct("model.3mf")
+with ftps_client as ftp:
+    # Upload with progress callback
+    ftp.upload_file("model.3mf", "model.3mf", progress_callback)
+
+# Then start print from SD
+bambu_client.start_print_from_sd(filename="model.3mf")
 ```
 
 **FTPS Technical Details:**
@@ -591,7 +609,8 @@ success = mqtt_client.send_print_file_direct("model.3mf")
 - Port: 990
 - Username: `bblp` (Bambu Printer Linux Printer)
 - Password: Access code from printer
-- Client: `src/services/ftps_service.py` - `SimpleFTPSClient` class
+- Client: `src/services/ftps_service.py` - `BambuFTPSClient` class
+- Target folder: `/cache/` on printer SD card
 
 **FTPS Error Handling:**
 | Error | Cause | Solution |
@@ -601,28 +620,47 @@ success = mqtt_client.send_print_file_direct("model.3mf")
 | Auth failed (530) | Wrong access code | Check access code in printer settings |
 | File not found (550) | Wrong path | Files upload to `/cache/` by default |
 
-**API Endpoint:**
+**Active Endpoints:**
 ```
-POST /api/jobs/upload-direct/{job_id}/print
+POST /api/print-control/{printer_id}/start-next  # Start next job in queue (uses FTPS)
 ```
 
-### Method 2: HTTP Download (Alternative)
+---
 
-If direct FTPS fails, fallback to HTTP server approach:
+### ❌ **HTTP Download Method (LEGACY - NOT USED)**
+
+**Status:** ⚠️ Code exists but NOT used in production workflow
+
+**Location:** `bambu_service.py` - `send_print_file()` function (line 1960)
+
+**Why Not Used:**
+- ❌ Requires HTTP server running
+- ❌ Printer must download from server (double network transfer)
+- ❌ More complex error handling
+- ❌ Slower than direct upload
+- ❌ Not integrated with main queue system
+
+**This method exists as:**
+- Legacy code from early development
+- Potential fallback if FTPS fails (not implemented)
+- Reference implementation for HTTP-based approach
+
+**How it would work (if used):**
 ```python
-# File served from local HTTP server
+# NOT USED IN PRODUCTION
 success = mqtt_client.send_print_file(
     "model.3mf",
     local_server_url="http://192.168.4.26:5000"
 )
+
+# Would do:
+# 1. File hosted at http://server:5000/uploads/model.3mf
+# 2. Send MQTT project_file with HTTP URL
+# 3. Printer downloads from HTTP server
+# 4. Send MQTT start command
 ```
 
-**How it works:**
-1. File uploaded to local server at `data/uploads/`
-2. Mounted via FastAPI StaticFiles at `/uploads` endpoint
-3. MQTT command sends HTTP URL to printer
-4. Printer downloads file from HTTP server
-5. MQTT start command triggers print
+**Conclusion:** System exclusively uses FTPS Direct Upload for reliability and performance.
 
 ---
 
