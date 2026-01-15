@@ -90,6 +90,44 @@ All new features and changes are developed in the `development` branch. After te
 - Remaining filament tracking per slot
 - MQTT sync with printer settings
 
+### 9. **Real-Time Status Monitoring** ✨ ENHANCED (Jan 2026)
+- **Print Progress Container**: Always visible with idle state support
+- **Accurate Time Tracking**: Fixed remaining time conversion (minutes → seconds)
+- **Smart Camera Reload**: Auto-reload on Status tab click
+- **Print Stopped Detection**: Detects stop from both web system and printer
+- **Live Status Updates**: WebSocket-based real-time updates
+- **Progress Bar**: Visual indicator with percentage and layer count
+- **Status Cards**: Time remaining, current layer, progress percentage
+
+### 10. **Enhanced Print Control**
+- Pause/Resume/Stop with database sync
+- Automatic queue status updates
+- Print stopped callback system
+- Comprehensive error logging
+- Status synchronization across UI components
+
+---
+
+## 🆕 Recent Updates (January 2026)
+
+### UI/UX Improvements
+- ✅ **Print Progress Always Visible**: Container shows status even when idle (displays "-" for inactive)
+- ✅ **Camera Auto-Reload**: Camera feed reloads when switching to Status tab
+- ✅ **Fixed Time Display**: Remaining time now correctly converted from minutes to seconds
+- ✅ **Enhanced Status Cards**: Conditional styling for active/idle states
+
+### Print Status Detection
+- ✅ **Dual Stop Detection**: System now detects print stopped from:
+  - Web interface (Stop button)
+  - Printer LCD interface (manual stop)
+- ✅ **Queue Status Sync**: Queue automatically updates to "stopped" when print cancelled from printer
+- ✅ **Callback System**: `on_print_stopped` callback detects gcode_state transitions
+
+### Code Quality
+- ✅ **Git Repository**: Initialized with proper .gitignore
+- ✅ **GitHub Integration**: Private repository with development branch
+- ✅ **Branch Workflow**: `development` → testing → `main`
+
 ---
 
 ## ⚠️ IMPORTANT: Print Startup Behavior Fix (January 2026)
@@ -154,6 +192,160 @@ UPDATE gcode_templates SET enabled=0 WHERE template_id=43;  -- Prepare Print
 | `src/services/print_control_service.py` | MQTT params selalu `True` |
 | `src/services/queue_service.py` | MQTT params selalu `True`, preprocessing aktif |
 | `data/farm.db` | Template ID 43 disabled |
+
+---
+
+## 🔧 Technical Implementation Details
+
+### Print Stopped Detection System
+
+**Problem Solved:** Queue status didn't update when print was stopped from printer LCD (only worked from web interface).
+
+**Solution:** Callback system to detect gcode_state transitions from MQTT.
+
+**Implementation:**
+
+1. **bambu_service.py** - State Detection
+```python
+def on_print_stopped(self):
+    """Callback when print is stopped (from printer or system)"""
+    # Detects: gcode_state transitions from printing/paused to idle
+    # Condition: progress < 100% (incomplete print)
+```
+
+2. **main.py** - Queue Update Handler
+```python
+def handle_print_stopped(printer_id: str):
+    """Update queue status when print stopped from printer"""
+    # Find active queue item (status: running/paused)
+    # Update queue status to "stopped"
+    # Update job status to "stopped"
+    # Log the event
+```
+
+3. **Callback Registration**
+```python
+bambu_client.on_print_stopped = handle_print_stopped
+```
+
+**Flow:**
+```
+Printer LCD Stop → MQTT gcode_state: FAILED → bambu_service detects change
+→ on_print_stopped callback → handle_print_stopped() → Update database
+→ WebSocket broadcast → Frontend updates UI
+```
+
+### Camera Auto-Reload System
+
+**Problem Solved:** Camera didn't reload without full page refresh.
+
+**Solution:** Component remount via key prop change on tab click.
+
+**Implementation:**
+
+1. **Dashboard.tsx** - Tab Click Handler
+```typescript
+const [cameraKey, setCameraKey] = useState(0);
+
+const handleTabClick = (tab: string) => {
+  if (tab === 'status') {
+    setCameraKey(prev => prev + 1); // Increment key to force remount
+  }
+  setActiveTab(tab);
+};
+
+// Pass key to PrinterStatus component
+<PrinterStatus key={cameraKey} printer={printer} />
+```
+
+**Effect:** New key causes React to unmount and remount component, triggering fresh camera connection.
+
+### Remaining Time Accuracy Fix
+
+**Problem Solved:** Remaining time displayed incorrectly (showed minutes as seconds).
+
+**Root Cause:** Bambu Lab MQTT sends `mc_remaining_time` in **minutes**, but system treated it as seconds.
+
+**Solution:**
+
+1. **bambu_service.py** - Conversion
+```python
+self.remaining_time: int = 0  # Store in SECONDS
+
+# On MQTT message
+if "mc_remaining_time" in print_data:
+    mc_remaining_time = int(print_data["mc_remaining_time"])
+    self.remaining_time = mc_remaining_time * 60  # Convert to seconds
+```
+
+2. **print_control.py** - API Response
+```python
+@router.get("/{printer_id}/mqtt-status")
+async def get_mqtt_status(printer_id: str):
+    return {
+        "remaining_time": status.get("mc_remaining_time", 0)  # Already in seconds
+    }
+```
+
+3. **Frontend** - Display
+```typescript
+const formatRemainingTime = (seconds: number): string => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+};
+```
+
+**Example:** 189 minutes → 11,340 seconds → "3h 9m" ✅ (not "3m" ❌)
+
+### Print Progress Always Visible
+
+**Problem Solved:** Progress container disappeared when printer was idle.
+
+**Solution:** Conditional rendering within container, not of the container itself.
+
+**Implementation:**
+
+**PrinterStatus.tsx**
+```typescript
+{/* Container ALWAYS renders */}
+<div style={{ backgroundColor: '#ffffff', padding: '20px' }}>
+  
+  {/* Progress bar ONLY when printing/paused */}
+  {(status === 'printing' || status === 'paused') && (
+    <div className="progress-bar">...</div>
+  )}
+  
+  {/* Status cards ALWAYS show */}
+  <div className="status-cards">
+    {/* Remaining Time - shows "-" when idle */}
+    <div>
+      {(status === 'printing' || status === 'paused') 
+        ? formatRemainingTime(remainingTime)
+        : '-'  // Gray dash when idle
+      }
+    </div>
+    
+    {/* Layer - shows "-" when idle */}
+    <div>
+      {(status === 'printing' || status === 'paused')
+        ? `${currentLayer} / ${totalLayers}`
+        : '-'  // Gray dash when idle
+      }
+    </div>
+  </div>
+  
+  {/* Control buttons ONLY when printing/paused */}
+  {(status === 'printing' || status === 'paused') && (
+    <div className="control-buttons">...</div>
+  )}
+</div>
+```
+
+**Result:** 
+- Idle: Shows gray "-" in cards, no progress bar, no buttons
+- Printing: Shows data, progress bar, and control buttons
+- Layout remains stable (no jumping)
 
 ---
 
@@ -590,7 +782,7 @@ class OrcaSlicerManager:
 - [x] Printer status cards (PrinterCard component)
 - [x] Tabbed dashboard interface
 
-### Phase 4: Testing & Refinement 🚧 IN PROGRESS
+### Phase 4: Testing & Refinement ✅ COMPLETED (Jan 2026)
 - [x] MQTT connection testing
 - [x] Auto-eject command testing
 - [x] Print start API testing
@@ -599,6 +791,17 @@ class OrcaSlicerManager:
   - [x] File upload directly to printer SD card
   - [x] MQTT start command integration
   - [x] Full end-to-end testing - **ALL TESTS PASSING** ✅
+- [x] **UI/UX Enhancements** ✨ NEW
+  - [x] Print progress container always visible
+  - [x] Camera auto-reload on tab switch
+  - [x] Remaining time accuracy fix
+  - [x] Print stopped detection from printer
+  - [x] Status card conditional styling
+- [x] **Version Control & Collaboration** ✨ NEW
+  - [x] Git repository initialization
+  - [x] GitHub private repository setup
+  - [x] Development branch workflow
+  - [x] Documentation updates
 - [x] **Filament Inventory System** ✨ NEW
   - [x] FilamentProfile database model
   - [x] Full CRUD API endpoints
@@ -833,6 +1036,32 @@ http://localhost:8000
 | POST | `/api/printers/{printer_id}/pause` | Pause print |
 | POST | `/api/printers/{printer_id}/resume` | Resume print |
 | POST | `/api/printers/{printer_id}/stop` | Stop print |
+
+#### Print Control & Status ✨ ENHANCED
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/print-control/{printer_id}/status` | Get current print status with job info |
+| GET | `/api/print-control/{printer_id}/mqtt-status` | Get real-time MQTT status (progress, time, temp) |
+| POST | `/api/print-control/{printer_id}/start-next` | Start next job in queue |
+| POST | `/api/print-control/{printer_id}/pause` | Pause current print |
+| POST | `/api/print-control/{printer_id}/resume` | Resume paused print |
+| POST | `/api/print-control/{printer_id}/stop` | Stop current print and update queue |
+
+**MQTT Status Response:**
+```json
+{
+  "printer_id": "03900D5A2402051",
+  "printer_status": "printing", // idle | printing | paused | offline
+  "mqtt_connected": true,
+  "progress": 45,                 // 0-100%
+  "remaining_time": 3540,        // seconds (converted from minutes)
+  "current_file": "model.3mf",
+  "nozzle_temp": 220.5,
+  "bed_temp": 60.0,
+  "layer_num": 125,
+  "total_layers": 280
+}
+```
 
 #### Filament Inventory ✨ NEW
 | Method | Endpoint | Description |
