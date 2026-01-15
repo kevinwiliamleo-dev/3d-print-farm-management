@@ -13,6 +13,13 @@ A web-based application to manage and automate 3D printing operations on a Bambu
 - `main` - Production-ready stable code
 - `development` - Active development and new features
 
+### Development Workflow
+All new features and changes are developed in the `development` branch. After testing and validation, changes are merged to `main` for production deployment.
+
+**Branch Creation Date:** January 15, 2026
+- Created `development` branch for ongoing feature development
+- Established workflow: `development` → testing → `main`
+
 ## �📋 Project Overview
 
 **Purpose:** Streamline 3D printing operations by automating file slicing, print job scheduling, queue management, and multi-printer control.
