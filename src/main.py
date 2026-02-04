@@ -61,10 +61,10 @@ async def lifespan(app: FastAPI):
         use_lan_mode=True
     )
     
-    # Handler for when print is stopped from printer directly
-    def handle_print_stopped():
-        """Update queue status when print is stopped from printer"""
-        logger.info("🛑 Print stopped from printer - updating queue status...")
+    # Handler for when print is completed successfully
+    def handle_print_complete():
+        """Update queue status when print completes successfully (100%)"""
+        logger.info("✅ Print completed - checking for loop...")
         try:
             db = next(get_db())
             # Find running or paused queue item
@@ -73,25 +73,70 @@ async def lifespan(app: FastAPI):
             ).first()
             
             if active_queue:
-                logger.info(f"Updating queue_id={active_queue.queue_id} status to 'stopped'")
-                active_queue.status = "stopped"
-                
-                # Update job status too
                 job = db.query(Job).filter(Job.job_id == active_queue.job_id).first()
-                if job:
-                    job.status = "stopped"
                 
-                db.commit()
-                logger.info(f"✅ Queue status updated to 'stopped'")
+                # Note: current_loop is already incremented when print started
+                logger.info(f"📊 Loop {active_queue.current_loop}/{job.loop_count if job else 1} completed")
+                
+                # Check if should repeat
+                if job and active_queue.current_loop < job.loop_count:
+                    # Need to repeat - auto start next loop
+                    logger.info(f"🔄 Starting loop {active_queue.current_loop + 1}/{job.loop_count}...")
+                    active_queue.status = "pending"
+                    db.commit()
+                    
+                    # Auto-start next loop in background thread
+                    import threading
+                    from src.services.queue_service import QueueService
+                    
+                    def auto_start_next_loop():
+                        try:
+                            logger.info(f"🚀 Auto-starting loop {active_queue.current_loop + 1}/{job.loop_count}")
+                            queue_service = QueueService(db)
+                            success = queue_service.start_queue_job(active_queue.queue_id)
+                            if success:
+                                logger.info(f"✅ Loop {active_queue.current_loop + 1} started successfully")
+                            else:
+                                logger.error(f"❌ Failed to auto-start loop {active_queue.current_loop + 1}")
+                        except Exception as e:
+                            logger.error(f"❌ Error auto-starting next loop: {e}")
+                    
+                    thread = threading.Thread(target=auto_start_next_loop, daemon=True)
+                    thread.start()
+                else:
+                    # All loops finished
+                    logger.info(f"✅ All loops finished ({active_queue.current_loop}/{job.loop_count if job else 1}) - marking as finished")
+                    active_queue.status = "finished"
+                    
+                    # Update job status too
+                    if job:
+                        job.status = "finished"
+                    
+                    db.commit()
+                
+                logger.info(f"✅ Queue status updated")
             else:
                 logger.info("No active queue item found to update")
             db.close()
         except Exception as e:
-            logger.error(f"Error updating queue on print stop: {e}")
+            logger.error(f"Error updating queue on print complete: {e}")
     
-    # Set callbacks
+    # NOTE: Print completion callbacks MUST be set here at startup
+    # PrintControlService callback needs to be active for auto-loop functionality
+    
+    # Setup PrintControlService with callbacks at startup
     if bambu_client:
-        bambu_client.on_print_stopped = handle_print_stopped
+        from src.services.print_control_service import PrintControlService
+        from src.database import SessionLocal
+        
+        # Create a persistent PrintControlService instance
+        startup_db = SessionLocal()
+        print_control_service = PrintControlService(startup_db, bambu_client)
+        logger.info("✅ PrintControlService callbacks registered")
+        
+        # Store reference to prevent garbage collection
+        app.state.print_control_service = print_control_service
+        app.state.startup_db = startup_db
     
     if bambu_client and bambu_client.mqtt_connected:
         logger.info(f"✅ Bambu MQTT client connected to {BAMBU_PRINTER_IP}")
@@ -102,6 +147,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down 3D Print Farm Management System")
+    
+    # Close startup database session
+    if hasattr(app.state, 'startup_db'):
+        app.state.startup_db.close()
+        logger.info("Startup database session closed")
+    
     shutdown_bambu_client()
     logger.info("Bambu MQTT client disconnected")
 
@@ -152,7 +203,7 @@ from fastapi.staticfiles import StaticFiles
 from src.config import UPLOAD_DIR
 
 # Serve uploaded files for printer download
-# Printer will access: http://controller-ip:5000/uploads/filename.3mf
+# Printer will access: http://controller-ip:5051/uploads/filename.3mf
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 
@@ -168,10 +219,9 @@ from src.api.camera import router as camera_router
 from src.api.printer_files import router as printer_files_router
 from src.api.filaments import router as filaments_router
 from src.api.bucket_list import router as bucket_list_router
-from src.api.templates_db import router as templates_router  # Changed to database version
-from src.api.presets import router as presets_router
+from src.api.bed_cooling import router as bed_cooling_router  # Bed cooling control
 
-# Include routers
+# Include API routers
 app.include_router(jobs_router)
 app.include_router(printers_router)
 app.include_router(queue_router)
@@ -182,8 +232,7 @@ app.include_router(camera_router)
 app.include_router(printer_files_router)
 app.include_router(filaments_router)
 app.include_router(bucket_list_router)
-app.include_router(templates_router)
-app.include_router(presets_router)
+app.include_router(bed_cooling_router)
 
 
 if __name__ == "__main__":

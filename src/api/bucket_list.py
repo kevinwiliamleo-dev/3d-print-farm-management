@@ -22,19 +22,12 @@ class AddToBucketRequest(BaseModel):
     ams_slot: int = Field(default=0)
     ams_mapping: str = ""
     use_ams: bool = True
+    filament_already_loaded: bool = False
     
-    # Filament profile
-    filament_id: Optional[int] = None
-    
-    # Automation settings
+    # Simplified automation (3 settings only)
     auto_bed_leveling: bool = True
     flow_calibration: bool = True
-    vibration_test: bool = False
-    clean_nozzle: bool = True
-    auto_eject: bool = False
-    cooldown_temp: int = 32
-    startup_sound: bool = True
-    end_sound: bool = True
+    timelapse: bool = False
     
     # Loop count
     loop_count: int = 1
@@ -66,15 +59,10 @@ async def add_to_bucket_list(request: AddToBucketRequest, db: Session = Depends(
             ams_slot=request.ams_slot,
             ams_mapping=request.ams_mapping,
             use_ams=request.use_ams,
-            filament_id=request.filament_id,
+            filament_already_loaded=request.filament_already_loaded,
             auto_bed_leveling=request.auto_bed_leveling,
             flow_calibration=request.flow_calibration,
-            vibration_test=request.vibration_test,
-            clean_nozzle=request.clean_nozzle,
-            auto_eject=request.auto_eject,
-            cooldown_temp=request.cooldown_temp,
-            startup_sound=request.startup_sound,
-            end_sound=request.end_sound,
+            timelapse=request.timelapse,
             loop_count=request.loop_count,
             notes=request.notes
         )
@@ -115,22 +103,17 @@ async def move_queue_to_bucket(queue_id: int, db: Session = Depends(get_db)):
         # Get job info
         job = db.query(Job).filter(Job.job_id == queue_item.job_id).first()
         
-        # Create bucket item with all settings from queue
+        # Create bucket item with simplified settings from queue (3 checkboxes + AMS)
         bucket_item = BucketList(
             job_id=queue_item.job_id,
             printer_id=queue_item.printer_id,
             ams_slot=queue_item.ams_slot,
             ams_mapping=queue_item.ams_mapping,
             use_ams=queue_item.use_ams,
-            filament_id=queue_item.filament_id,
+            filament_already_loaded=queue_item.filament_already_loaded,
             auto_bed_leveling=queue_item.auto_bed_leveling,
             flow_calibration=queue_item.flow_calibration,
-            vibration_test=queue_item.vibration_test,
-            clean_nozzle=queue_item.clean_nozzle,
-            auto_eject=queue_item.auto_eject,
-            cooldown_temp=queue_item.cooldown_temp,
-            startup_sound=queue_item.startup_sound,
-            end_sound=queue_item.end_sound,
+            timelapse=queue_item.timelapse,
             loop_count=job.loop_count if job else 1
         )
         
@@ -233,7 +216,7 @@ async def move_bucket_to_queue(
         ).count()
         new_position = max_position + 1
         
-        # Create queue item with all settings from bucket
+        # Create queue item with simplified settings from bucket
         queue_item = Queue(
             job_id=bucket_item.job_id,
             printer_id=printer_id,
@@ -241,15 +224,10 @@ async def move_bucket_to_queue(
             ams_slot=bucket_item.ams_slot,
             ams_mapping=bucket_item.ams_mapping,
             use_ams=bucket_item.use_ams,
-            filament_id=bucket_item.filament_id,
+            filament_already_loaded=bucket_item.filament_already_loaded,
             auto_bed_leveling=bucket_item.auto_bed_leveling,
             flow_calibration=bucket_item.flow_calibration,
-            vibration_test=bucket_item.vibration_test,
-            clean_nozzle=bucket_item.clean_nozzle,
-            auto_eject=bucket_item.auto_eject,
-            cooldown_temp=bucket_item.cooldown_temp,
-            startup_sound=bucket_item.startup_sound,
-            end_sound=bucket_item.end_sound,
+            timelapse=bucket_item.timelapse,
             status="pending"
         )
         

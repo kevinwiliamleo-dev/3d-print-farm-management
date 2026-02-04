@@ -77,55 +77,22 @@ class Queue(Base):
     job_id = Column(Integer, ForeignKey("jobs.job_id"), nullable=False)
     printer_id = Column(String(100), default="bambu-a1-001")
     position_in_queue = Column(Integer, index=True)
-    current_loop = Column(Integer, default=1)
+    current_loop = Column(Integer, default=0)  # Start from 0, increment after each completion
     status = Column(String(50), default="pending")  # pending, running, completed, failed
     
     # AMS (Automatic Material System) settings
-    # ams_slot: Which AMS slot to use (0-3 for AMS Lite, 254 for external spool)
-    # ams_mapping: Full AMS mapping string for multi-color prints (e.g., "[0,1,2,3]")
-    ams_slot = Column(Integer, default=0)  # Default to slot 0
-    ams_mapping = Column(String(100), default="")  # Empty = auto, or "[0]" for slot 0
-    use_ams = Column(Boolean, default=True)  # Whether to use AMS or external spool
-    filament_already_loaded = Column(Boolean, default=False)  # Skip AMS load if filament already in extruder
+    ams_slot = Column(Integer, default=0)  # Which AMS slot to use (0-3)
+    ams_mapping = Column(String(100), default="")  # AMS mapping for multi-color
+    use_ams = Column(Boolean, default=True)  # Whether to use AMS
+    filament_already_loaded = Column(Boolean, default=False)  # Skip AMS load
     
-    # Template mode (NEW - RECOMMENDED)
-    # When True: Replace ALL start/end gcode with optimized templates
-    # When False: Use legacy section toggle mode (comment out specific sections)
-    use_template_mode = Column(Boolean, default=True)
+    # Print settings (3 checkboxes only - for display, not processing)
+    auto_bed_leveling = Column(Boolean, default=True)   # Enable bed leveling
+    flow_calibration = Column(Boolean, default=False)   # Enable flow calibration  
+    timelapse = Column(Boolean, default=False)          # Enable timelapse recording
     
-    # Filament profile reference (for temperature overrides)
-    filament_id = Column(Integer, ForeignKey("filament_profiles.filament_id"), nullable=True)
-    
-    # ==================== Print Automation Settings ====================
-    # These control G-code preprocessing before sending to printer
-    
-    # Calibration options
-    auto_bed_leveling = Column(Boolean, default=True)   # Enable G29 bed leveling
-    flow_calibration = Column(Boolean, default=True)    # Enable flow test (M983/M984)
-    vibration_test = Column(Boolean, default=False)     # Enable resonance test (M970)
-    clean_nozzle = Column(Boolean, default=True)        # Enable nozzle cleaning sequence
-    wipe_nozzle = Column(Boolean, default=True)         # Enable wipe nozzle section (M109 S140 wait)
-    nozzle_load_line = Column(Boolean, default=True)    # Enable nozzle purge line at front of bed
-    
-    # Automation options
-    auto_eject = Column(Boolean, default=False)         # Auto push-off after print
-    cooldown_temp = Column(Integer, default=32)         # Target bed temp before eject (°C)
-    
-    # Sound options
-    startup_sound = Column(Boolean, default=True)       # Play startup melody
-    end_sound = Column(Boolean, default=True)           # Play completion melody
-    
-    # Timelapse option
-    timelapse = Column(Boolean, default=True)           # Enable timelapse recording
-    
-    # Quick Start options (FactorianDesigns optimization) - ENABLED BY DEFAULT
-    quick_start = Column(Boolean, default=True)         # Skip vibration + flow for faster startup
-    preheat_offset = Column(Integer, default=20)        # Heat to nozzle_temp - offset (0=disabled, 20=recommended)
-    pre_extrude = Column(Boolean, default=True)         # Add pre-extrude command before print
-    pre_extrude_length = Column(Float, default=2.2)     # Length to extrude in mm
-    
-    # Processing bypass option
-    skip_preprocessing = Column(Boolean, default=False)  # Skip ALL G-code preprocessing (print file as-is)
+    # Skip ALL preprocessing - file from slicer sent as-is
+    skip_preprocessing = Column(Boolean, default=True)  # Always True - no G-code modification
     
     # Modified file path - stores the queue-specific modified 3MF file
     # This is the actual file that will be printed (with G-code modifications applied)
@@ -137,7 +104,6 @@ class Queue(Base):
     
     # Relationships
     job = relationship("Job", back_populates="queue_items")
-    filament = relationship("FilamentProfile")
 
 
 class BucketList(Base):
@@ -155,29 +121,12 @@ class BucketList(Base):
     ams_slot = Column(Integer, default=0)
     ams_mapping = Column(String(100), default="")
     use_ams = Column(Boolean, default=True)
-    filament_already_loaded = Column(Boolean, default=False)  # Skip AMS load if filament already in extruder
+    filament_already_loaded = Column(Boolean, default=False)
     
-    # Filament profile reference
-    filament_id = Column(Integer, ForeignKey("filament_profiles.filament_id"), nullable=True)
-    
-    # Print Automation Settings
+    # Print settings (3 checkboxes only)
     auto_bed_leveling = Column(Boolean, default=True)
-    flow_calibration = Column(Boolean, default=True)
-    vibration_test = Column(Boolean, default=False)
-    clean_nozzle = Column(Boolean, default=True)
-    wipe_nozzle = Column(Boolean, default=True)         # Enable wipe nozzle section (M109 S140 wait)
-    nozzle_load_line = Column(Boolean, default=True)    # Enable nozzle purge line at front of bed
-    auto_eject = Column(Boolean, default=False)
-    cooldown_temp = Column(Integer, default=32)
-    startup_sound = Column(Boolean, default=True)
-    end_sound = Column(Boolean, default=True)
-    timelapse = Column(Boolean, default=True)           # Enable timelapse recording
-    
-    # Quick Start options (FactorianDesigns optimization) - ENABLED BY DEFAULT
-    quick_start = Column(Boolean, default=True)         # Skip vibration + flow for faster startup
-    preheat_offset = Column(Integer, default=20)        # Heat to nozzle_temp - offset (0=disabled)
-    pre_extrude = Column(Boolean, default=True)         # Add pre-extrude command before print
-    pre_extrude_length = Column(Float, default=2.2)     # Length to extrude in mm
+    flow_calibration = Column(Boolean, default=False)
+    timelapse = Column(Boolean, default=False)
     
     # Loop count for this bucket item
     loop_count = Column(Integer, default=1)
@@ -188,7 +137,6 @@ class BucketList(Base):
     
     # Relationships
     job = relationship("Job")
-    filament = relationship("FilamentProfile")
 
 
 class PrintHistory(Base):
@@ -245,6 +193,24 @@ class Printer(Base):
     bed_target_temp = Column(Float, default=0.0)
     chamber_temp = Column(Float, default=0.0)
     
+    # Error tracking (synced from MQTT)
+    print_error = Column(Integer, default=0)  # Error code from printer (0 = no error)
+    
+    # Queue automation settings
+    auto_continue = Column(Boolean, default=True)  # Auto start next job after completion
+    
+    # Print stage tracking (synced from MQTT)
+    # stg_cur values: -1=idle, 0=printing, 1=auto bed leveling, 2=heatbed preheating, 
+    # 3=sweeping XY mech mode, 4=changing filament, 5=M400 pause, 6=paused due to filament runout,
+    # 7=heating hotend, 8=calibrating extrusion, 9=scanning bed surface, 10=inspecting first layer,
+    # 11=identifying build plate type, 12=calibrating micro lidar, 13=homing toolhead,
+    # 14=cleaning nozzle tip, 15=checking extruder temperature, 16=paused by user
+    print_stage = Column(Integer, default=0)  # Current print stage from printer
+    
+    # A1 Tilt Kit configuration for bed cooling
+    kit_enabled = Column(Boolean, default=False)  # Is Kit installed and enabled?
+    kit_ip = Column(String(50), nullable=True)  # Kit IP address for control
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -253,6 +219,10 @@ class AMSSlotAssignment(Base):
     """
     AMS Slot Assignments
     Links filament profiles to AMS slots on each printer
+    
+    Synced from printer MQTT (like OrcaSlicer):
+    - color: Actual color from printer (RRGGBBAA hex)
+    - filament_name: Human-readable name from printer
     """
     __tablename__ = "ams_slot_assignments"
 
@@ -261,6 +231,8 @@ class AMSSlotAssignment(Base):
     slot_number = Column(Integer, nullable=False)  # 0-3 for AMS Lite
     filament_id = Column(Integer, ForeignKey("filament_profiles.filament_id"), nullable=False)
     remaining_grams = Column(Float, default=1000)  # Remaining filament in grams
+    color = Column(String(10), nullable=True)  # Synced from printer (RRGGBBAA hex)
+    filament_name = Column(String(255), nullable=True)  # Synced from printer
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Unique constraint: one filament per slot per printer
@@ -270,55 +242,6 @@ class AMSSlotAssignment(Base):
     
     # Relationships
     filament = relationship("FilamentProfile")
-
-
-class GCodeTemplate(Base):
-    """
-    GCode Template database
-    Stores gcode templates per printer type with order
-    
-    Features:
-    - Each printer can have different templates
-    - Templates have order for execution sequence
-    - Category: 'start' or 'end' gcode
-    - Controllable: can be enabled/disabled via Queue Settings
-    """
-    __tablename__ = "gcode_templates"
-
-    template_id = Column(Integer, primary_key=True, index=True)
-    template_key = Column(String(100), nullable=False)  # Unique key like "machine_init", "ams_loading"
-    
-    # Printer association (NULL = default for all printers)
-    printer_model = Column(String(100), nullable=True)  # "Bambu Lab A1", "Bambu Lab P1S", NULL=default
-    
-    # Template info
-    name = Column(String(255), nullable=False)  # Display name: "Machine Init"
-    description = Column(Text, nullable=True)  # What this template does
-    category = Column(String(20), nullable=False)  # 'start' or 'end'
-    
-    # Execution order within category (1, 2, 3...)
-    order = Column(Integer, nullable=False, default=1)
-    
-    # Template enabled by default
-    enabled = Column(Boolean, default=True)
-    
-    # Controllable via Queue Settings
-    # If True, users can enable/disable this template in Queue Settings UI
-    # If False, template is always included (core functionality)
-    controllable = Column(Boolean, default=False)
-    setting_key = Column(String(100), nullable=True)  # Maps to Queue setting: "vibration_test", "auto_eject", etc.
-    
-    # The actual gcode content with variables like {nozzle_temp}, {bed_temp}
-    gcode = Column(Text, nullable=False)
-    
-    # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Unique constraint: one template_key per printer_model
-    __table_args__ = (
-        {'sqlite_autoincrement': True},
-    )
 
 
 class FilamentProfile(Base):
@@ -376,67 +299,6 @@ class FilamentProfile(Base):
     
     # Metadata
     is_active = Column(Boolean, default=True)  # Aktif/tidak digunakan
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class PrintPreset(Base):
-    """
-    Print Presets - User-defined automation setting profiles
-    Users can create presets like "Quick Print", "Full Calibration", etc.
-    and quickly apply them when adding jobs to queue.
-    """
-    __tablename__ = "print_presets"
-
-    preset_id = Column(Integer, primary_key=True, index=True)
-    
-    # Basic Info
-    name = Column(String(100), nullable=False)  # "Quick Print", "Full Calibration"
-    description = Column(Text, nullable=True)  # Optional description
-    icon = Column(String(10), default="⚡")  # Emoji icon for preset
-    color = Column(String(8), default="3b82f6")  # Hex color for UI
-    
-    # Is this the default preset?
-    is_default = Column(Boolean, default=False)
-    
-    # ==================== Start GCode (21 templates) ====================
-    start_machine = Column(Boolean, default=False)
-    heat_bed_hotend = Column(Boolean, default=False)
-    startup_sound = Column(Boolean, default=False)
-    avoid_end_stop = Column(Boolean, default=False)
-    reset_machine_status = Column(Boolean, default=False)
-    cog_noise_reduction = Column(Boolean, default=False)
-    ams_slot = Column(Boolean, default=False)
-    flow_calibration = Column(Boolean, default=False)
-    vibration_test = Column(Boolean, default=False)
-    wipe_nozzle = Column(Boolean, default=False)
-    clean_nozzle = Column(Boolean, default=False)
-    brush_material_wipe = Column(Boolean, default=False)
-    final_wipe_nozzle = Column(Boolean, default=False)
-    auto_bed_leveling = Column(Boolean, default=False)
-    home_after_wipe = Column(Boolean, default=False)
-    prepare_print = Column(Boolean, default=False)
-    nozzle_load_line = Column(Boolean, default=False)
-    extrude_calibration_test = Column(Boolean, default=False)
-    turn_off_light = Column(Boolean, default=False)
-    final_start = Column(Boolean, default=False)
-    pre_extrude = Column(Boolean, default=False)
-    preheat_offset = Column(Integer, default=20)
-    quick_start = Column(Boolean, default=False)  # Skip vibration + flow for faster startup
-    
-    # ==================== End GCode (6 templates) ====================
-    end_print_start = Column(Boolean, default=False)
-    timelapse = Column(Boolean, default=False)
-    move_safe_position = Column(Boolean, default=False)
-    auto_eject = Column(Boolean, default=False)
-    end_sound = Column(Boolean, default=False)
-    end_print_final = Column(Boolean, default=False)
-    cooldown_temp = Column(Integer, default=32)
-    
-    # Template mode
-    use_template_mode = Column(Boolean, default=True)
-    
-    # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

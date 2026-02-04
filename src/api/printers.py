@@ -144,6 +144,55 @@ async def update_printer_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.patch("/{printer_id}/auto-continue")
+async def toggle_auto_continue(
+    printer_id: str,
+    auto_continue: bool,
+    db: Session = Depends(get_db)
+):
+    """
+    Toggle auto-continue setting for printer
+    
+    When enabled (True): Automatically start next job after current job completes
+    When disabled (False): Wait for manual 'Start Next Job' click after completion
+    
+    Args:
+        printer_id: Printer identifier
+        auto_continue: True to enable auto-continue, False to disable
+    
+    Returns:
+        Updated printer with auto_continue status
+    """
+    try:
+        from src.database.db import Printer
+        
+        printer = db.query(Printer).filter(Printer.printer_id == printer_id).first()
+        
+        if not printer:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Printer not found: printer_id={printer_id}"
+            )
+        
+        printer.auto_continue = auto_continue
+        db.commit()
+        db.refresh(printer)
+        
+        status_text = "enabled" if auto_continue else "disabled"
+        logger.info(f"✅ Auto-continue {status_text} for printer {printer_id}")
+        
+        return {
+            "printer_id": printer_id,
+            "auto_continue": auto_continue,
+            "message": f"Auto-continue {status_text}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling auto-continue: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.patch("/{printer_id}/mqtt")
 async def update_mqtt_status(
     printer_id: str,
@@ -886,4 +935,56 @@ async def get_ams_loading_status(printer_id: str):
         raise
     except Exception as e:
         logger.error(f"Error getting AMS loading status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{printer_id}/ams/sync-from-printer")
+async def sync_ams_from_printer(printer_id: str):
+    """
+    Manually sync AMS data from printer to database.
+    
+    This endpoint triggers a one-time sync of current AMS slot data
+    from the printer's MQTT status to the database slot assignments.
+    
+    Useful when:
+    - User changes filament at the printer
+    - User wants to refresh slot assignments
+    - After loading/unloading filament
+    
+    Inspired by OrcaSlicer's sync mechanism.
+    
+    Returns:
+        - **synced_slots**: Number of slots synced
+        - **timestamp**: When sync occurred
+    """
+    try:
+        from src.services.bambu_service import get_bambu_client
+        import datetime
+        
+        bambu_client = get_bambu_client()
+        if not bambu_client or not bambu_client.mqtt_connected:
+            raise HTTPException(status_code=503, detail="Printer not connected")
+        
+        # Trigger manual sync
+        bambu_client._sync_ams_to_database()
+        
+        # Count filled slots
+        filled_slots = sum(
+            1 for ams in bambu_client.ams_data.get("ams", [])
+            for tray in ams.get("trays", [])
+            if not tray.get("empty", True)
+        )
+        
+        return {
+            "success": True,
+            "message": "AMS data synced from printer to database",
+            "printer_id": printer_id,
+            "synced_slots": filled_slots,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing AMS from printer: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

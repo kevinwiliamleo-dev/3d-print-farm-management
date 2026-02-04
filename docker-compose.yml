@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Backend Service (Python FastAPI)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: 3d-farm-backend
+    restart: unless-stopped
+    ports:
+      - "5051:5051"
+    volumes:
+      # Mount source code untuk hot reload (DEVELOPMENT MODE)
+      - ./src:/app/src:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Printer data diambil dari database, tidak perlu env vars
+      # Hanya diperlukan jika belum ada printer di database (first run)
+      - BAMBU_PRINTER_IP=${BAMBU_PRINTER_IP:-}
+      - BAMBU_PRINTER_ID=${BAMBU_PRINTER_ID:-}
+      - BAMBU_ACCESS_CODE=${BAMBU_ACCESS_CODE:-}
+    networks:
+      - printfarm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5051/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service (React)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: development  # Use development stage for hot reload
+    container_name: 3d-farm-frontend
+    restart: unless-stopped
+    ports:
+      - "3051:3051"
+    volumes:
+      # Mount source code untuk hot reload (DEVELOPMENT MODE)
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+    environment:
+      - PORT=3051
+      - REACT_APP_API_URL=http://localhost:5051
+      - CHOKIDAR_USEPOLLING=true  # Enable hot reload in Docker
+    networks:
+      - printfarm-network
+    depends_on:
+      - backend
+
+  # Watchtower - Auto update dari Git (optional)
+  watchtower:
+    image: containrrr/watchtower
+    container_name: 3d-farm-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 --cleanup  # Check every 5 minutes
+    networks:
+      - printfarm-network
+
+networks:
+  printfarm-network:
+    driver: bridge
+
+volumes:
+  data:
+  logs:

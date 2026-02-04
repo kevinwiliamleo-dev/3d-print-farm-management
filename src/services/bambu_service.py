@@ -9,18 +9,30 @@ Enhanced with:
 - Connection state management (SOCKET_STATE, API_STATE)
 - Auto-reconnection logic
 - subtask_name for print tracking
+- Automatic bed cooling with external Kit fan
 """
 import json
 import logging
 import time
 import threading
 import ssl
+import asyncio
 from typing import Callable, Dict, Any, Optional
 from enum import Enum
 from dataclasses import dataclass
 import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)
+
+
+# Import bed cooling service
+try:
+    from src.services.bed_cooling_service import get_cooling_service
+    COOLING_SERVICE_AVAILABLE = True
+except ImportError:
+    logger.warning("⚠️ Bed cooling service not available")
+    COOLING_SERVICE_AVAILABLE = False
+    get_cooling_service = None
 
 
 # ============================================================================
@@ -64,6 +76,7 @@ def _sync_printer_status_to_db(
     bed_target: float = None,
     chamber_temp: float = None,
     remaining_time: int = None,
+    print_stage: int = None,
 ):
     """
     Sync full printer status to database.
@@ -100,6 +113,8 @@ def _sync_printer_status_to_db(
                     printer.chamber_temp = chamber_temp
                 if hasattr(printer, 'remaining_time') and remaining_time is not None:
                     printer.remaining_time = remaining_time
+                if hasattr(printer, 'print_stage') and print_stage is not None:
+                    printer.print_stage = print_stage
                 
                 db.commit()
                 logger.debug(f"📊 Synced printer status: {printer_id}, status={status}, progress={progress}%")
@@ -294,6 +309,27 @@ class BambuLabMQTTClient:
         # Time tracking
         self.remaining_time: int = 0  # mc_remaining_time in seconds
         
+        # Error tracking
+        self.print_error: int = 0  # Error code from printer (0 = no error)
+        
+        # Print stage tracking (stg_cur from MQTT)
+        self.print_stage: int = 0  # Current stage: 1=homing, 2=heating, etc
+        
+        # Track previous status to detect transitions
+        self._previous_status: str = "offline"
+        
+        # Bed cooling service (auto-control external fan)
+        self.cooling_service = None
+        if COOLING_SERVICE_AVAILABLE:
+            self.cooling_service = get_cooling_service(self.printer_id)
+            # Load Kit configuration from database
+            self._load_kit_config()
+            logger.info("🌡️ Bed cooling service enabled")
+        
+        # AMS auto-sync tracking (like OrcaSlicer)
+        self._last_tray_exist_bits = "0"
+        self._last_ams_exist_bits = "0"
+        
         # Temperature data
         self.nozzle_temp = 0.0
         self.nozzle_target_temp = 0.0
@@ -381,6 +417,30 @@ class BambuLabMQTTClient:
                     "old_state": old_state.value,
                     "new_state": state.value,
                 })
+    
+    def _load_kit_config(self):
+        """Load Kit configuration from database for bed cooling"""
+        try:
+            from src.database import SessionLocal
+            db = SessionLocal()
+            try:
+                from sqlalchemy import text
+                result = db.execute(
+                    text("SELECT kit_enabled, kit_ip FROM printers WHERE printer_id = :printer_id"),
+                    {"printer_id": self.printer_id}
+                ).fetchone()
+                
+                if result and self.cooling_service:
+                    kit_enabled, kit_ip = result
+                    if kit_enabled and kit_ip:
+                        self.cooling_service.configure_kit(kit_ip, enabled=True)
+                        logger.info(f"✅ Kit loaded from database: IP={kit_ip}, Enabled=True")
+                    else:
+                        logger.info("⏭️  Kit not configured in database")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"❌ Failed to load Kit config: {e}")
     
     def _generate_sequence_id(self) -> str:
         """Generate a unique sequence ID for MQTT commands"""
@@ -688,6 +748,10 @@ class BambuLabMQTTClient:
                 if "total_layer_num" in print_data:
                     self.total_layers = int(print_data.get("total_layer_num", 0))
                 
+                # Extract error code (0 = no error)
+                if "print_error" in print_data:
+                    self.print_error = int(print_data.get("print_error", 0))
+                
                 # Store remaining time (mc_remaining_time is in MINUTES from printer)
                 if mc_remaining_time:
                     self.remaining_time = int(mc_remaining_time) * 60  # Convert to seconds
@@ -698,12 +762,20 @@ class BambuLabMQTTClient:
                 elif "subtask_name" in print_data:
                     self.current_subtask_name = print_data.get("subtask_name", "")
                 
+                # Extract print stage (stg_cur) - current stage of print process
+                if "stg_cur" in print_data:
+                    self.print_stage = int(print_data.get("stg_cur", 0))
+                
                 # Determine printer_status based on gcode_state
                 old_status = self.printer_status
                 if gcode_state in ["RUNNING", "PREPARE"]:
                     self.printer_status = "printing"
                     self.current_print_progress = mc_percent
                     status_changed = (old_status != "printing")
+                    
+                    # Special handling for PREPARE state - set stage to -2 for "Preparing"
+                    if gcode_state == "PREPARE" and "stg_cur" not in print_data:
+                        self.print_stage = -2  # Custom code for "Preparing"
                 elif gcode_state in ["IDLE", "FINISH", "FAILED"]:
                     self.printer_status = "idle"
                     if gcode_state != "FINISH":
@@ -747,7 +819,27 @@ class BambuLabMQTTClient:
                 bed_target=self.bed_target_temp,
                 chamber_temp=self.chamber_temp,
                 remaining_time=mc_remaining_time,
+                print_stage=self.print_stage,
             )
+            
+            # ============================================================
+            # Automatic Bed Cooling Control
+            # If bed needs cooling (current > target), auto-control Kit fan
+            # ============================================================
+            if self.cooling_service:
+                try:
+                    # Run async cooling check in thread-safe manner
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(
+                        self.cooling_service.update_temperature(
+                            bed_temp=self.bed_temp,
+                            bed_target_temp=self.bed_target_temp
+                        )
+                    )
+                    loop.close()
+                except Exception as e:
+                    logger.error(f"❌ Bed cooling check failed: {e}")
             
             # Callback for status updates
             if self.on_status_update:
@@ -762,11 +854,15 @@ class BambuLabMQTTClient:
                     "mc_remaining_time": mc_remaining_time,
                 })
             
-            # Detect print completion
-            if self.printer_status == "idle" and self.current_print_progress == 100:
-                logger.info("Print job completed!")
+            # Simple completion detection: printer went from printing/paused to idle
+            # When printer becomes idle, trigger completion check (let PrintControlService handle it)
+            if self.printer_status == "idle" and self._previous_status in ["printing", "paused"]:
+                logger.info("🎉 Printer became idle (print finished)")
                 if self.on_print_complete:
                     self.on_print_complete()
+            
+            # Update previous status for next comparison
+            self._previous_status = self.printer_status
             
             # Detect print stopped/failed from printer (status changed to idle but not completed)
             if status_changed and self.printer_status == "idle" and old_status in ["printing", "paused"] and self.current_print_progress < 100:
@@ -814,17 +910,29 @@ class BambuLabMQTTClient:
         }
         """
         try:
+            # ============================================================
+            # AMS Change Detection (like OrcaSlicer)
+            # Detect when trays are added/removed/changed
+            # ============================================================
+            old_tray_bits = self._last_tray_exist_bits
+            old_ams_bits = self._last_ams_exist_bits
+            new_tray_bits = ams_data.get("tray_exist_bits", "0")
+            new_ams_bits = ams_data.get("ams_exist_bits", "0")
+            
             # Update AMS metadata
             self.ams_data["tray_now"] = int(ams_data.get("tray_now", 255))
             self.ams_data["tray_tar"] = int(ams_data.get("tray_tar", 255))
             self.ams_data["tray_pre"] = int(ams_data.get("tray_pre", 255))
-            self.ams_data["ams_exist_bits"] = ams_data.get("ams_exist_bits", "0")
-            self.ams_data["tray_exist_bits"] = ams_data.get("tray_exist_bits", "0")
+            self.ams_data["ams_exist_bits"] = new_ams_bits
+            self.ams_data["tray_exist_bits"] = new_tray_bits
             self.ams_data["version"] = ams_data.get("version", 0)
             
             # Process AMS units and their trays
             ams_list = ams_data.get("ams", [])
             parsed_ams_list = []
+            
+            # Debug: Log raw AMS data to see what printer sends
+            logger.debug(f"📦 Raw AMS data from printer: {json.dumps(ams_list, indent=2)}")
             
             for ams_unit in ams_list:
                 ams_id = int(ams_unit.get("id", 0))
@@ -853,6 +961,16 @@ class BambuLabMQTTClient:
                     if not tray.get("empty", True)
                 )
                 logger.debug(f"🎨 AMS update: {len(parsed_ams_list)} unit(s), {filled_trays} filled tray(s), tray_now={self.ams_data['tray_now']}")
+            
+            # ============================================================
+            # Smart Auto-Sync to Database (inspired by OrcaSlicer)
+            # Only sync when AMS/tray configuration changes
+            # ============================================================
+            if old_tray_bits != new_tray_bits or old_ams_bits != new_ams_bits:
+                logger.info(f"🔄 AMS configuration changed (tray: {old_tray_bits}→{new_tray_bits}, ams: {old_ams_bits}→{new_ams_bits}), syncing to database...")
+                self._sync_ams_to_database()
+                self._last_tray_exist_bits = new_tray_bits
+                self._last_ams_exist_bits = new_ams_bits
                 
         except Exception as e:
             logger.warning(f"Error processing AMS data: {e}")
@@ -899,6 +1017,9 @@ class BambuLabMQTTClient:
         
         # Get human-readable name from filament index
         filament_name = self._get_filament_name(tray_info_idx) or tray_type
+        
+        # Debug log parsed tray
+        logger.debug(f"🎨 Parsed tray {tray_id}: type={tray_type}, color={tray_color}, name={filament_name}, idx={tray_info_idx}")
         
         return {
             "id": tray_id,
@@ -953,6 +1074,73 @@ class BambuLabMQTTClient:
             "GFN99": "Generic PA",
         }
         return FILAMENT_NAMES.get(idx, idx if idx else "Unknown")
+
+    def _sync_ams_to_database(self):
+        """
+        Sync current AMS data from printer to database slot assignments.
+        Inspired by OrcaSlicer's sync mechanism.
+        
+        This updates the ams_slot_assignments table to reflect:
+        - Current filament types in each slot
+        - Remaining filament percentage (0-100)
+        
+        Note: This only updates existing assignments, it does NOT auto-create
+        new filament profiles. User must manually assign filaments first time.
+        """
+        try:
+            from src.database import SessionLocal
+            from src.database.db import AMSSlotAssignment
+            
+            db = SessionLocal()
+            try:
+                # Get current AMS data from memory
+                ams_list = self.ams_data.get("ams", [])
+                
+                for ams_unit in ams_list:
+                    ams_id = ams_unit.get("id", 0)
+                    trays = ams_unit.get("trays", [])
+                    
+                    for tray in trays:
+                        if tray.get("empty", True):
+                            continue  # Skip empty slots
+                        
+                        slot_number = tray.get("id", 0)
+                        tray_type = tray.get("type", "")
+                        tray_color = tray.get("color", "00000000")
+                        tray_name = tray.get("name", tray_type)
+                        tray_remain_percent = tray.get("remain", 0)  # 0-100
+                        
+                        # Find existing assignment for this slot
+                        assignment = db.query(AMSSlotAssignment).filter(
+                            AMSSlotAssignment.printer_id == self.printer_id,
+                            AMSSlotAssignment.slot_number == slot_number
+                        ).first()
+                        
+                        if assignment:
+                            # Convert percentage to grams estimate
+                            # Assume 1000g standard spool (will be more accurate if we stored original weight)
+                            estimated_grams = (tray_remain_percent / 100.0) * 1000.0
+                            
+                            # Update remaining grams, color, and name from printer
+                            assignment.remaining_grams = estimated_grams
+                            assignment.color = tray_color
+                            assignment.filament_name = tray_name
+                            
+                            logger.info(f"✅ Synced slot {slot_number}: {tray_name} ({tray_type}), {tray_color}, {estimated_grams:.0f}g ({tray_remain_percent}%)")
+                        else:
+                            logger.debug(f"⏭️ Slot {slot_number} not assigned in database, skipping auto-sync")
+                
+                db.commit()
+                logger.info("✅ AMS database sync complete")
+                
+            except Exception as e:
+                logger.error(f"❌ AMS database sync failed: {e}")
+                db.rollback()
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to import database modules for AMS sync: {e}")
 
     def _update_ams_loading_state(self, print_data: Dict[str, Any]):
         """
@@ -1889,7 +2077,7 @@ G1 X0 Y250 F12000 ; move to back corner
             logger.debug(traceback.format_exc())
             return False
 
-    def send_print_file(self, file_path: str, local_server_url: str = "http://localhost:5000", skip_http: bool = False) -> bool:
+    def send_print_file(self, file_path: str, local_server_url: str = "http://localhost:5051", skip_http: bool = False) -> bool:
         """
         Send print command to Bambu Lab printer (LAN mode)
         
@@ -2010,6 +2198,10 @@ G1 X0 Y250 F12000 ; move to back corner
             # Current print tracking
             "current_subtask_name": self.current_subtask_name,
             "current_task_id": self.current_task_id,
+            # Error tracking
+            "print_error": self.print_error,
+            # Print stage tracking (stg_cur from MQTT)
+            "print_stage": self.print_stage,
         }
 
     def is_printer_online(self) -> bool:
@@ -2023,6 +2215,29 @@ G1 X0 Y250 F12000 ; move to back corner
     def get_print_progress(self) -> int:
         """Get current print progress percentage (0-100)"""
         return self.current_print_progress
+    
+    def configure_bed_cooling(self, kit_ip: str, enabled: bool = True):
+        """
+        Configure automatic bed cooling with external Kit fan
+        
+        Args:
+            kit_ip: IP address of ESP32 Kit (e.g. "192.168.1.100")
+            enabled: Enable/disable auto cooling feature
+        
+        Example:
+            client.configure_bed_cooling("192.168.1.150", enabled=True)
+        """
+        if self.cooling_service:
+            self.cooling_service.configure_kit(kit_ip, enabled)
+            logger.info(f"🌡️ Bed cooling configured: Kit IP={kit_ip}, Enabled={enabled}")
+        else:
+            logger.warning("⚠️ Cooling service not available")
+    
+    def get_cooling_status(self) -> Dict[str, Any]:
+        """Get current bed cooling status"""
+        if self.cooling_service:
+            return self.cooling_service.get_cooling_status()
+        return {"is_cooling": False, "kit_enabled": False}
 
 
 # ============================================================================

@@ -66,7 +66,52 @@ All new features and changes are developed in the `development` branch. After te
 - Success/failure rates
 - Print duration analytics
 
-## 🆕 Recent Updates (January 2026)
+## 🆕 Recent Updates (February 2026)
+
+**Critical Bug Fixes (February 3, 2026):**
+- ✅ **Fixed Premature Print Completion Bug**
+  - **Problem**: Queue showed loop completed in 0.0 minutes (6ms after start)
+  - **Root Cause**: Completion callback triggered during "uploading" status phase
+  - **Solution**: 
+    * Removed "uploading" from active queue status filter
+    * Added 30-second minimum runtime validation
+    * Track start time per queue_id: `self._last_running_time`
+    * Ignore completion if print ran < 30 seconds
+  - **Impact**: Accurate loop tracking and print duration logging
+  - **File**: `src/services/print_control_service.py` (lines 52, 58-110, 315, 555)
+
+- ✅ **Fixed Calibration Inverse Logic Bug**
+  - **Problem**: Calibrations running despite checkboxes OFF (inverse behavior)
+  - **Root Cause**: Incorrect `not` operator applied to boolean values
+  - **Solution**: 
+    * Removed `not` operator from `flow_cali` and `bed_leveling`
+    * Changed `vibration_cali=True` → `vibration_cali=False` (always skip)
+    * Updated logic: True=RUN calibration, False=SKIP calibration
+  - **Impact**: Checkboxes now work correctly (OFF=skip, ON=run)
+  - **File**: `src/services/print_control_service.py` (lines 298-300, 514-516)
+
+**Major Simplification (February 2, 2026):**
+- ✅ **Removed ALL Preset & Template Systems**
+  - Deleted PrintPreset model & database table
+  - Deleted GCodeTemplate model & database table
+  - Removed /api/presets/* endpoints (323 lines)
+  - Removed /api/templates_db/* endpoints (entire file)
+  - Eliminated 800+ lines of G-code modification logic
+- ✅ **Simplified Queue System**
+  - Reduced from 40+ parameters to 7 essential parameters
+  - Only 3 print checkboxes: bed_leveling, flow_calibration, timelapse
+  - Only 4 AMS settings: slot, mapping, use_ams, filament_already_loaded
+  - Files from slicer sent AS-IS without modification
+- ✅ **Updated File Processing**
+  - Changed from "modify G-code with templates" to "copy file as-is"
+  - skip_preprocessing = True (always enabled)
+  - Simple shutil.copy() instead of complex preprocessing
+- ✅ **Documentation Updated**
+  - README reflects new simplified system
+  - Marked old template sections as DEPRECATED
+  - Added migration notes for February 2026 changes
+
+**Previous Updates (January 2026):**
 
 **UI/UX Enhancements:**
 - Print progress always visible (shows idle state)
@@ -82,35 +127,81 @@ All new features and changes are developed in the `development` branch. After te
 
 ---
 
-## ⚙️ Print Startup Configuration (January 2026)
+## ⚙️ Print Settings (February 2026)
 
-**Issue Fixed:** Printer was waiting at front of bed with purge line instead of cut filament position (side).
+**MAJOR SIMPLIFICATION:** Removed all preset and template systems. Files from slicer (OrcaSlicer/BambuStudio) are sent AS-IS without any G-code modification.
 
-**Root Cause:**
-- MQTT calibration parameters set to `False` triggered built-in calibration
-- G-code template `prepare_print` moved nozzle to front of bed by default
-- Default settings in multiple files needed coordination
+### What Was Removed (February 2, 2026)
 
-**Solution Applied:**
+**Database Models:**
+- ❌ `PrintPreset` - Print preset system (21 start templates + 6 end templates)
+- ❌ `GCodeTemplate` - G-code template storage and management
 
-1. **MQTT Calibration Parameters** (Always `True` = Skip Built-in Cal)
-   - Files: `bambu_service.py`, `print_control_service.py`, `queue_service.py`
-   ```python
-   "flow_cali": True,
-   "vibration_cali": True,
-   "bed_leveling": True
-   ```
+**API Endpoints:**
+- ❌ `/api/presets/*` - All preset management endpoints (323 lines removed)
+- ❌ `/api/templates_db/*` - All template management endpoints (entire file removed)
 
-2. **G-code Templates Defaults**
-   - Files: `gcode_templates.py`, `gcode_preprocessor.py`
-   ```python
-   prepare_print: bool = False      # Avoid moving to front
-   nozzle_load_line: bool = False   # Avoid purge line
-   ```
+**File Processing:**
+- ❌ G-code modification engine (400+ lines removed)
+- ❌ Template injection system
+- ❌ Section toggle system
+- ❌ 40+ automation parameters removed:
+  - vibration_test, clean_nozzle, wipe_nozzle, nozzle_load_line
+  - auto_eject, cooldown_temp, startup_sound, end_sound
+  - quick_start, preheat_offset, pre_extrude, pre_extrude_length
+  - cog_noise_reduction, brush_material_wipe, final_wipe_nozzle
+  - avoid_end_stop, reset_machine_status, home_after_wipe
+  - prepare_print, extrude_calibration_test, turn_off_light, final_start
 
-3. **Database:** Template ID 43 (Prepare Print) disabled
+### Current System (Simplified)
 
-**Result:** ✅ Printer waits at cut filament position (X-48.2), no purge line at front
+**Print Settings (3 Checkboxes - Working Correctly as of Feb 3, 2026):**
+- ✅ **Bed Leveling** (`auto_bed_leveling`) - True=RUN, False=SKIP (normal logic)
+- ✅ **Flow Calibration** (`flow_calibration`) - True=RUN, False=SKIP (normal logic)
+- ✅ **Timelapse** (`timelapse`) - True=ENABLE, False=DISABLE
+- ⚠️ **Note**: Vibration calibration always SKIPPED by system design
+
+**AMS Settings (4 Fields):**
+- ✅ `ams_slot` - AMS tray slot (0-3)
+- ✅ `ams_mapping` - AMS mapping for multi-color
+- ✅ `use_ams` - Whether to use AMS
+- ✅ `filament_already_loaded` - Skip AMS load sequence
+
+**Other:**
+- ✅ `loop_count` - Number of times to print this job
+- ✅ **Loop Tracking**: Accurate duration logging (min 30s validation)
+
+### New File Processing Flow
+
+```
+1. USER UPLOADS FILE from OrcaSlicer/BambuStudio
+   └─> File already has ALL settings configured in slicer
+
+2. SYSTEM COPIES FILE AS-IS
+   └─> shutil.copy(source_file, queue_file_path)
+   └─> NO G-code modification
+   └─> skip_preprocessing = True (always)
+
+3. SYSTEM SENDS FILE TO PRINTER
+   └─> FTPS upload to printer SD card
+   └─> File printed exactly as exported from slicer
+
+4. PRINT SETTINGS STORED FOR DISPLAY ONLY
+   └─> 3 checkboxes shown in queue UI
+   └─> No actual processing applied to file
+```
+
+**Why This Change:**
+- Slicer (OrcaSlicer/BambuStudio) already configures all settings
+- No need for system to modify G-code
+- Simpler, more predictable behavior
+- Eliminates 800+ lines of complex template logic
+
+---
+
+## ⚙️ Print Startup Configuration (January 2026) - DEPRECATED
+
+**⚠️ WARNING:** This section describes the OLD template/preset system that was removed on February 2, 2026. Files are now sent as-is from slicer without any modification.
 
 ---
 
@@ -279,13 +370,16 @@ cooking-ai-agent/
 |-------|---------|
 | `printers` | Printer configurations (IP, access code, etc) |
 | `jobs` | Uploaded files & metadata |
-| `queue` | Print queue with settings |
+| `queue` | Print queue with simplified settings (3 checkboxes + AMS) |
 | `history` | Completed print logs |
 | `filament_profiles` | Filament inventory |
 | `ams_slot_assignments` | AMS slot → filament mapping |
-| `gcode_templates` | G-code template library |
-| `print_presets` | Saved print setting presets |
-| `automation_settings` | Automation preferences |
+| `bucket_list` | Saved jobs for later printing |
+
+**Removed Tables (February 2, 2026):**
+- ❌ `gcode_templates` - G-code template library (removed)
+- ❌ `print_presets` - Saved print setting presets (removed)
+- ❌ `automation_settings` - Automation preferences (removed)
 
 ---
 
@@ -590,14 +684,30 @@ class OrcaSlicerManager:
 - notes
 ```
 
-### Queue Table
+### Queue Table (Simplified - February 2026)
 ```
 - queue_id (PRIMARY KEY)
 - job_id (FOREIGN KEY)
-- printer_id (FOREIGN KEY)
+- printer_id
 - position_in_queue
 - current_loop
+- status (pending, running, completed, failed, stopped)
+# AMS settings (4 fields)
+- ams_slot (0-3)
+- ams_mapping ("[0]", "[0,1,2,3]", etc)
+- use_ams (boolean)
+- filament_already_loaded (boolean)
+# Print settings (3 checkboxes - for display only)
+- auto_bed_leveling (boolean)
+- flow_calibration (boolean)
+- timelapse (boolean)
+# File processing
+- skip_preprocessing (always True)
+- queue_file_path (path to copied file)
+# Timestamps
 - created_at
+- started_at
+- completed_at
 ```
 
 ---
@@ -796,15 +906,19 @@ start.bat           # Windows
 ./start.sh          # Linux/macOS
 ```
 
-**Access:** http://localhost:3000
+**Access:** http://localhost:3051
 
 ---
 
 ## 📝 Configuration
 
-### .env File
+### .env File (Opsional - Untuk Development)
+
+> **Catatan:** Printer configuration **disimpan di database** (SQLite: `./data/farm.db`).  
+> Environment variables di bawah ini hanya sebagai **fallback** untuk testing/development.
+
 ```env
-# Bambu Lab Credentials
+# Bambu Lab Credentials (OPSIONAL - gunakan UI untuk add printer)
 BAMBU_USERNAME=your_email@example.com
 BAMBU_ACCESS_CODE=your_access_code
 BAMBU_PRINTER_IP=192.168.1.100
@@ -812,12 +926,18 @@ BAMBU_PRINTER_ID=03900D5A2402051
 BAMBU_PRINTER_SN=03900D5A2402051
 
 # Server
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
+BACKEND_PORT=5051
+FRONTEND_PORT=3051
 
 # Database
 DB_PATH=./data/farm.db
 ```
+
+**Cara Add Printer (Recommended):**
+1. Buka frontend: http://localhost:3051
+2. Navigate ke Printer Settings
+3. Add printer via UI → Data tersimpan di database
+4. Database persistent via Docker volume mounting
 
 See [SETUP.md](SETUP.md) for detailed configuration guide.
 
@@ -847,13 +967,36 @@ http://localhost:8000
 | PUT | `/api/jobs/{job_id}` | Update job |
 | DELETE | `/api/jobs/{job_id}` | Delete job |
 
-#### Queue Management
+#### Queue Management (Simplified - February 2026)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/queue` | Get current queue |
-| POST | `/api/queue` | Add job to queue |
-| PUT | `/api/queue/{queue_id}` | Update queue item position |
+| GET | `/api/queue/{printer_id}` | Get queue for printer |
+| POST | `/api/queue/add` | Add job to queue (7 parameters only) |
+| PUT | `/api/queue/{queue_id}/position` | Update queue position |
 | DELETE | `/api/queue/{queue_id}` | Remove from queue |
+
+**AddToQueueRequest Schema (Simplified):**
+```json
+{
+  "job_id": 1,
+  "printer_id": "03900D5A2402051",
+  // AMS settings (4 fields)
+  "ams_slot": 0,
+  "ams_mapping": "[0]",
+  "use_ams": true,
+  "filament_already_loaded": false,
+  // Print settings (3 checkboxes)
+  "auto_bed_leveling": true,
+  "flow_calibration": false,
+  "timelapse": false
+}
+```
+
+**What Was Removed:**
+- ❌ 40+ automation parameters (vibration_test, clean_nozzle, quick_start, etc.)
+- ❌ preset_id parameter
+- ❌ use_template_mode parameter
+- ❌ All template/preset-related fields
 
 #### Printer Control
 | Method | Endpoint | Description |
@@ -1249,9 +1392,14 @@ For detailed information, see:
 
 This is a personal project for 3D print farm automation. For questions or suggestions, please open an issue on GitHub.
 
-**Project Status:** ✅ Production Ready  
-**Last Updated:** January 15, 2026
+**Project Status:** ✅ Production Ready (with Feb 3, 2026 bug fixes)  
+**Last Updated:** February 3, 2026
+
+**Recent Fixes:**
+- ✅ Print completion timing validation (30s minimum)
+- ✅ Calibration logic corrected (checkboxes work as expected)
 
 ---
 
 **Made with ❤️ for Bambu Lab A1 Combo AMS**
+xZ

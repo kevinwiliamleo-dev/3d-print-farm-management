@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+venv_clean/
+ENV/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+frontend/build/
+frontend/.env.local
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data folders (sudah di-mount sebagai volume)
+data/uploads/
+data/gcode/
+data/3mf_input/
+data/3mf_output/
+data/queue_files/
+
+# Environment variables (sensitive)
+.env
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Documentation (tidak perlu di container)
+docs/
+*.md
+!README.md
+
+# Test files
+test_*.py
+*_test.py
+
+# Temporary files
+*.tmp
+temp/
+tmp/

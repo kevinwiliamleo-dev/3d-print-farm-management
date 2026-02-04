@@ -1,0 +1,42 @@
+# Production docker-compose (untuk nanti kalau sudah stable)
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: 3d-farm-backend-prod
+    restart: always
+    ports:
+      - "5051:5051"
+    volumes:
+      # Only mount data, not source code
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Printer data diambil dari database
+      - BAMBU_PRINTER_IP=${BAMBU_PRINTER_IP:-}
+      - BAMBU_PRINTER_ID=${BAMBU_PRINTER_ID:-}
+      - BAMBU_ACCESS_CODE=${BAMBU_ACCESS_CODE:-}
+    networks:
+      - printfarm-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: production  # Use production build
+    container_name: 3d-farm-frontend-prod
+    restart: always
+    ports:
+      - "80:80"  # Nginx on port 80
+    networks:
+      - printfarm-network
+    depends_on:
+      - backend
+
+networks:
+  printfarm-network:
+    driver: bridge

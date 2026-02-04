@@ -381,11 +381,12 @@ async def get_slot_assignments(printer_id: str, db: Session = Depends(get_db)):
                 fp.name,
                 fp.brand,
                 fp.material_type,
-                fp.color_hex,
+                COALESCE(sa.color, fp.color_hex) as color_hex,
                 fp.color_name,
                 fp.nozzle_temp_default,
                 fp.bed_temp_default,
-                fp.spool_weight
+                fp.spool_weight,
+                sa.filament_name
             FROM ams_slot_assignments sa
             LEFT JOIN filament_profiles fp ON sa.filament_id = fp.filament_id
             WHERE sa.printer_id = :printer_id
@@ -404,11 +405,12 @@ async def get_slot_assignments(printer_id: str, db: Session = Depends(get_db)):
                 "name": row[4],
                 "brand": row[5],
                 "material_type": row[6],
-                "color_hex": row[7],
+                "color_hex": row[7],  # Priority: synced color from printer, fallback to profile
                 "color_name": row[8],
                 "nozzle_temp_default": row[9],
                 "bed_temp_default": row[10],
-                "spool_weight": row[11]
+                "spool_weight": row[11],
+                "filament_name_from_printer": row[12]  # Human-readable name from printer
             }
         
         return {

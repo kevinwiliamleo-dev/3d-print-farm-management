@@ -219,6 +219,7 @@ async def send_all_status(websocket: WebSocket):
                         "bed_temp": bambu_client.bed_temp,
                         "bed_target_temp": bambu_client.bed_target_temp,
                         "chamber_temp": bambu_client.chamber_temp,
+                        "print_stage": bambu_client.print_stage,
                     })
                 elif bambu_client and bambu_client.printer_id == printer.printer_id and not bambu_client.mqtt_connected:
                     # MQTT client exists but not connected - likely reconnecting
@@ -323,6 +324,7 @@ async def send_printer_status(websocket: WebSocket, printer_id: str):
                 "bed_temp": bambu_client.bed_temp,
                 "bed_target_temp": bambu_client.bed_target_temp,
                 "chamber_temp": bambu_client.chamber_temp,
+                "print_stage": bambu_client.print_stage,
                 # Remaining time from database (updated via MQTT)
                 "remaining_time": getattr(printer, 'remaining_time', 0) or 0,
                 "current_file": getattr(printer, 'current_file', '') or '',
@@ -342,6 +344,7 @@ async def send_printer_status(websocket: WebSocket, printer_id: str):
                 "bed_temp": getattr(printer, 'bed_temp', 0) or 0,
                 "bed_target_temp": getattr(printer, 'bed_target_temp', 0) or 0,
                 "chamber_temp": getattr(printer, 'chamber_temp', 0) or 0,
+                "print_stage": getattr(printer, 'print_stage', 0) or 0,
                 # Remaining time from database
                 "remaining_time": getattr(printer, 'remaining_time', 0) or 0,
                 "current_file": getattr(printer, 'current_file', '') or '',

@@ -112,8 +112,8 @@ async def print_from_sd_card(
     filename: str,
     use_ams: bool = True,
     ams_slot: int = 0,
-    flow_cali: bool = True,
-    vibration_cali: bool = True,
+    flow_cali: bool = False,
+    vibration_cali: bool = False,  # Always False - settings from slicer
     bed_leveling: bool = True,
     timelapse: bool = False
 ):

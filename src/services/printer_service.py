@@ -54,7 +54,8 @@ class PrinterService:
             "printer_id": printer_record.printer_id,
             "printer_name": printer_record.printer_name,
             "status": printer_record.status,
-            "mqtt_connected": printer_record.mqtt_connected
+            "mqtt_connected": printer_record.mqtt_connected,
+            "auto_continue": printer_record.auto_continue
         }
 
     def get_printer_by_id(self, printer_id: str) -> dict:
@@ -68,6 +69,7 @@ class PrinterService:
             "printer_name": printer.printer_name,
             "status": printer.status,
             "mqtt_connected": printer.mqtt_connected,
+            "auto_continue": printer.auto_continue,
             "created_at": printer.created_at,
             "updated_at": printer.updated_at
         }
@@ -80,7 +82,8 @@ class PrinterService:
                 "printer_id": p.printer_id,
                 "printer_name": p.printer_name,
                 "status": p.status,
-                "mqtt_connected": p.mqtt_connected
+                "mqtt_connected": p.mqtt_connected,
+                "auto_continue": p.auto_continue
             }
             for p in printers
         ]

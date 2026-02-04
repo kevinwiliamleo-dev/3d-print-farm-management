@@ -308,6 +308,32 @@ async def delete_job(job_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error deleting job: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.patch("/{job_id}/loop-count")
+async def update_job_loop_count(job_id: int, loop_count: int, db: Session = Depends(get_db)):
+    """Update job loop count"""
+    try:
+        if loop_count < 1:
+            raise HTTPException(status_code=400, detail="loop_count must be >= 1")
+        
+        job_service = JobService(db)
+        job = job_service.get_job_by_id(job_id)
+        
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job not found: job_id={job_id}")
+        
+        # Update loop_count in database
+        from src.database.db import Job
+        db.query(Job).filter(Job.job_id == job_id).update({"loop_count": loop_count})
+        db.commit()
+        
+        logger.info(f"Updated job {job_id} loop_count to {loop_count}")
+        return {"message": "Loop count updated", "job_id": job_id, "loop_count": loop_count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating job loop count: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{job_id}/gcode")
 async def get_job_gcode(

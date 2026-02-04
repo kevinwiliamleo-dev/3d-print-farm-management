@@ -323,6 +323,8 @@ async def get_mqtt_status(
             "current_layer": status.get("current_layer", 0),
             "total_layers": status.get("total_layers", 0),
             "current_file": status.get("current_subtask_name", ""),
+            "print_error": status.get("print_error", 0),
+            "print_stage": status.get("print_stage", 0),  # Print stage tracking (stg_cur from MQTT)
         }
     
     except Exception as e:

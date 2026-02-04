@@ -30,27 +30,16 @@ class PrinterStatusEnum(str, Enum):
 
 class PrintAutomationSettings(BaseModel):
     """
-    Per-job automation settings for G-code preprocessing
-    Controls calibration, auto-eject, and other print farm features
+    Simplified automation settings (3 checkboxes only)
+    Settings come from slicer - these are MQTT command flags only
     """
-    # Calibration options
-    auto_bed_leveling: bool = Field(default=True, description="Enable G29 bed leveling")
-    flow_calibration: bool = Field(default=True, description="Enable flow test (M983/M984)")
-    vibration_test: bool = Field(default=False, description="Enable resonance test (M970)")
-    clean_nozzle: bool = Field(default=True, description="Enable nozzle cleaning sequence")
-    
-    # Automation options
-    auto_eject: bool = Field(default=False, description="Auto push-off after print completes")
-    cooldown_temp: int = Field(default=32, ge=25, le=50, description="Target bed temp before eject (°C)")
-    
-    # Sound options
-    startup_sound: bool = Field(default=True, description="Play startup melody")
-    end_sound: bool = Field(default=True, description="Play completion melody")
+    # Calibration options (sent via MQTT command)
+    auto_bed_leveling: bool = Field(default=True, description="Enable bed leveling calibration")
+    flow_calibration: bool = Field(default=False, description="Enable flow calibration")
+    timelapse: bool = Field(default=False, description="Enable timelapse recording")
     
     def validate_settings(self):
-        """Auto-eject requires flow_calibration OFF to prevent debris"""
-        if self.auto_eject and self.flow_calibration:
-            self.flow_calibration = False
+        """No validation needed - simple flags"""
         return self
 
 
@@ -153,17 +142,12 @@ class QueueItemResponse(BaseModel):
     # AMS settings
     ams_slot: int = 0
     use_ams: bool = True
-    filament_id: Optional[int] = None
+    filament_already_loaded: bool = False
     
-    # Automation settings
+    # Simplified automation (3 settings only)
     auto_bed_leveling: bool = True
-    flow_calibration: bool = True
-    vibration_test: bool = False
-    clean_nozzle: bool = True
-    auto_eject: bool = False
-    cooldown_temp: int = 32
-    startup_sound: bool = True
-    end_sound: bool = True
+    flow_calibration: bool = False
+    timelapse: bool = False
     
     created_at: datetime
     started_at: Optional[datetime] = None
