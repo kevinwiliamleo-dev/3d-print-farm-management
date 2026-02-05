@@ -3,24 +3,16 @@ FROM node:18-alpine as development
 
 WORKDIR /app
 
-# Copy package files
-COPY frontend/package*.json ./
+# Copy entire frontend folder struktur
+COPY frontend/ .
 
-# Install dependencies - simplified approach
-RUN apk add --no-cache git && \
-    npm config set registry https://registry.npmjs.org/ && \
-    npm install --no-audit --no-fund || exit 0
-
-# Copy frontend code
-COPY frontend/ ./
-
-# Install any missing dependencies at runtime
-RUN npm install --no-audit --no-fund 2>/dev/null || true
+# Install dependencies
+RUN npm install --no-audit --no-fund
 
 # Expose frontend port
 EXPOSE 3051
 
-# Run development server (hot reload enabled)
+# Run development server
 CMD ["npm", "start"]
 
 
