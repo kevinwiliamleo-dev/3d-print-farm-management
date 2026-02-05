@@ -6,12 +6,7 @@ WORKDIR /app
 # Copy package files
 COPY frontend/package*.json ./
 
-# Configure npm to use mirror registry + increase timeouts
-RUN npm config set registry https://registry.npmmirror.com/ && \
-    npm config set fetch-retry-mintimeout 20000 && \
-    npm config set fetch-retry-maxtimeout 120000
-
-# Install dependencies
+# Install dependencies (using default npm registry)
 RUN npm install --no-audit --no-fund
 
 # Copy application code
