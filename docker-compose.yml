@@ -70,6 +70,9 @@ services:
 networks:
   printfarm-network:
     driver: bridge
+    # Jika mau connect ke portainer_network yang existing, ganti dengan:
+    # external: true
+    # name: portainer_network
 
 volumes:
   data:
