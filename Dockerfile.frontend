@@ -2,8 +2,8 @@
 # Build happens in GitHub Actions runner, not in Docker
 FROM nginx:alpine
 
-# Copy pre-built dist folder (built by GitHub Actions)
-COPY frontend/build /usr/share/nginx/html
+# Copy pre-built build folder (context is now frontend/, so build/ is at root of context)
+COPY build /usr/share/nginx/html
 
 # Expose port
 EXPOSE 3051
