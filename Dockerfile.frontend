@@ -1,12 +1,21 @@
 # Frontend Dockerfile - React Development
-FROM node:18-alpine
+# Use Debian-based Node (glibc) for better npm package compatibility
+FROM node:18-slim
 
 WORKDIR /app
+
+# Install build tools for native npm modules (canvas, serialport, etc.)
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY frontend/package*.json ./
 
-# Install dependencies (using default npm registry)
+# Clean install dependencies
 RUN npm install --no-audit --no-fund
 
 # Copy application code
