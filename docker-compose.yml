@@ -1,11 +1,9 @@
 version: '3.8'
 
 services:
-  # Backend Service (Python FastAPI)
+  # Backend Service (Python FastAPI) - Pull from GHCR
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
+    image: ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-backend:development
     container_name: 3d-farm-backend
     restart: unless-stopped
     ports:
@@ -30,12 +28,9 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend Service (React)
+  # Frontend Service (React) - Pull from GHCR
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-      target: development  # Use development stage for hot reload
+    image: ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-frontend:development
     container_name: 3d-farm-frontend
     restart: unless-stopped
     ports:
