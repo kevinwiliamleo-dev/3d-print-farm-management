@@ -1,6 +1,7 @@
 # Core Framework - Minimal compatible versions
 fastapi
-uvicorn
+uvicorn[standard]
+websockets
 starlette
 pydantic
 python-multipart
