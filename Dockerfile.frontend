@@ -6,8 +6,10 @@ WORKDIR /app
 # Copy package files
 COPY frontend/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies with retry and verbose logging
+RUN npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm install --verbose --legacy-peer-deps || npm install --verbose --legacy-peer-deps
 
 # Copy frontend code
 COPY frontend/ ./
