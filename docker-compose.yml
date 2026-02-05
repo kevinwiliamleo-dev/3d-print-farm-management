@@ -47,7 +47,6 @@ services:
       - PORT=3051
       - REACT_APP_API_URL=http://localhost:5051
       - CHOKIDAR_USEPOLLING=true  # Enable hot reload in Docker
-    command: sh -c "npm install --no-audit --no-fund && npm start"
     networks:
       - printfarm-network
     depends_on:
