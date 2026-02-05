@@ -70,7 +70,7 @@ MQTT_KEEPALIVE = int(os.getenv("MQTT_KEEPALIVE", 60))
 
 # API Settings
 API_TIMEOUT_SECONDS = int(os.getenv("API_TIMEOUT_SECONDS", 30))
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3051,http://localhost:8080").split(",")
+CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3051,http://localhost:8080").split(",")]
 
 # Logging Settings
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
