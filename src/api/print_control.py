@@ -7,63 +7,30 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from src.database import get_db
 from src.services.print_control_service import PrintControlService
-from src.services.bambu_service import BambuLabMQTTClient
-from src.config import (
-    BAMBU_USERNAME,
-    BAMBU_PASSWORD,
-    BAMBU_PRINTER_ID,
-    BAMBU_PRINTER_IP,
-    BAMBU_ACCESS_CODE,
-    MQTT_BROKER,
-    MQTT_PORT,
-)
+from src.services.bambu_service import get_bambu_client  # Use global client getter
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/print-control", tags=["print-control"])
 
-# Global MQTT client instance
-bambu_client = None
-print_control_service = None
-
 
 def get_print_service(db: Session = Depends(get_db)):
-    """Get or create print control service"""
-    global bambu_client, print_control_service
+    """Get print control service with global MQTT client"""
+    # Use global MQTT client from main.py (initialized at startup)
+    bambu_client = get_bambu_client()
     
     if bambu_client is None:
-        # Use LAN mode if printer IP is available
-        if BAMBU_PRINTER_IP and BAMBU_ACCESS_CODE:
-            logger.info(f"Initializing MQTT client in LAN mode: {BAMBU_PRINTER_IP}")
-            bambu_client = BambuLabMQTTClient(
-                printer_id=BAMBU_PRINTER_ID,
-                printer_ip=BAMBU_PRINTER_IP,
-                access_code=BAMBU_ACCESS_CODE,
-                use_lan_mode=True,
-            )
-        else:
-            # Fallback to cloud mode
-            logger.info("Initializing MQTT client in Cloud mode")
-            bambu_client = BambuLabMQTTClient(
-                printer_id=BAMBU_PRINTER_ID,
-                mqtt_broker=MQTT_BROKER,
-                mqtt_port=MQTT_PORT,
-                bambu_username=BAMBU_USERNAME,
-                bambu_password=BAMBU_PASSWORD,
-                use_lan_mode=False,
-            )
-        # Ensure MQTT client is connected
-        if not bambu_client.mqtt_connected:
-            logger.info("MQTT not connected, attempting connection...")
-            try:
-                bambu_client.connect()
-            except Exception as e:
-                logger.warning(f"Failed to connect MQTT: {str(e)}")
+        logger.error("❌ Global Bambu MQTT client not initialized! Check main.py startup.")
+        raise HTTPException(
+            status_code=503,
+            detail="MQTT client not available. Printer may be offline or not configured."
+        )
+    
+    if not bambu_client.mqtt_connected:
+        logger.warning("⚠️ MQTT client exists but not connected. Check printer status.")
     
     # Always create new service with fresh db session
-    print_control_service = PrintControlService(db, bambu_client)
-    
-    return print_control_service
+    return PrintControlService(db, bambu_client)
 
 
 @router.post("/{printer_id}/start-print")

@@ -845,6 +845,34 @@ Mode:            LAN Mode (local network)
 | Auth failed | Wrong credentials | Username: `bblp`, Password: printer access code |
 | Upload succeeds but print fails | File in wrong folder | Files go to `/cache/` folder |
 
+### MQTT Connection Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Rapid disconnect/reconnect (flapping) | Multiple MQTT clients attempting connection | Use global client from `main.py`, disable local client in `print_control.py` |
+| "Initializing MQTT client in Cloud mode" with empty printer_id | `print_control.py` creating new client on each API call | Ensure all config in database, not environment variables |
+| Connection stable but logs show repeated connect attempts | Dual client initialization (global + local) | Remove local client initialization, use global only |
+| "[Errno -5] No address associated with hostname" | Cloud mode fallback with missing credentials | Configure printer in database via UI, not env vars |
+
+**Root Cause:** `src/api/print_control.py` attempts to create a NEW MQTT client when global client is `None`. If environment variables are empty (config stored in database), it falls back to Cloud mode with empty `printer_id`, causing repeated failed connection attempts.
+
+**Proper Flow:**
+1. ✅ `main.py` initializes global MQTT client from database on startup (LAN mode)
+2. ❌ `print_control.py` should use global client, NOT create new one
+3. ✅ All printer config stored in database, accessed via UI
+
+**Debug Commands:**
+```bash
+# Check log for multiple client initializations
+docker logs 3d-farm-backend | grep "Initializing MQTT"
+
+# Should only see ONE line at startup:
+# "Initializing Bambu Lab MQTT client..." (from main.py)
+
+# If you see multiple lines or "Cloud mode":
+# Problem: Local client creation in print_control.py
+```
+
 ### WebSocket Issues
 
 | Issue | Cause | Solution |
