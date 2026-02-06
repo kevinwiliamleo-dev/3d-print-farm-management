@@ -220,6 +220,7 @@ from src.api.printer_files import router as printer_files_router
 from src.api.filaments import router as filaments_router
 from src.api.bucket_list import router as bucket_list_router
 from src.api.bed_cooling import router as bed_cooling_router  # Bed cooling control
+from src.api.discovery import router as discovery_router  # Printer auto-discovery
 
 # Include API routers
 app.include_router(jobs_router)
@@ -233,6 +234,7 @@ app.include_router(printer_files_router)
 app.include_router(filaments_router)
 app.include_router(bucket_list_router)
 app.include_router(bed_cooling_router)
+app.include_router(discovery_router, prefix="/api/discovery", tags=["discovery"])
 
 
 if __name__ == "__main__":
