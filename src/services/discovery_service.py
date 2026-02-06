@@ -176,30 +176,38 @@ class PrinterDiscoveryService:
         
         # Method 0: Check known printer IP from config first (fastest)
         if self._known_printer_ip:
-            logger.info(f"[0/4] Checking configured printer at {self._known_printer_ip}...")
+            logger.info(f"[0/5] Checking configured printer at {self._known_printer_ip}...")
             config_result = self._check_known_printer()
             if config_result:
                 discovered.append(config_result)
                 logger.info(f"Found configured printer at {self._known_printer_ip}")
         
-        # Method 1: Try mDNS hostnames (fast)
-        logger.info("[1/4] Checking mDNS hostnames...")
+        # Method 1: UDP broadcast on port 2021 (PROPER Bambu Lab discovery protocol)
+        logger.info("[1/5] Trying UDP broadcast discovery (port 2021)...")
+        udp_results = self._udp_broadcast_discover(timeout=min(3.0, timeout / 2))
+        for r in udp_results:
+            if r["ip_address"] not in [d.get("ip_address") for d in discovered]:
+                discovered.append(r)
+                logger.info(f"✅ Found printer via UDP: {r['printer_name']} at {r['ip_address']}")
+        
+        # Method 2: Try mDNS hostnames (fast)
+        logger.info("[2/5] Checking mDNS hostnames...")
         mdns_results = self._check_mdns_hostnames()
         for r in mdns_results:
             if r["ip_address"] not in [d.get("ip_address") for d in discovered]:
                 discovered.append(r)
         
-        # Method 2: Try SSDP discovery (Bambu Lab specific)
-        logger.info("[2/4] Trying SSDP discovery...")
+        # Method 3: Try SSDP discovery (Bambu Lab specific)
+        logger.info("[3/5] Trying SSDP discovery...")
         ssdp_results = self._ssdp_discover(timeout=2.0)
         for r in ssdp_results:
             if r["ip_address"] not in [d.get("ip_address") for d in discovered]:
                 discovered.append(r)
         
-        # Method 3: Fast parallel port scan on all local subnets
+        # Method 4: Fast parallel port scan on all local subnets (fallback)
         remaining_time = timeout - (time.time() - start_time)
-        if remaining_time > 1.0:
-            logger.info("[3/4] Running parallel network scan...")
+        if remaining_time > 1.0 and len(discovered) == 0:
+            logger.info("[4/5] Running parallel network scan (fallback)...")
             scan_results = self._fast_parallel_scan(max_time=remaining_time)
             for r in scan_results:
                 if r["ip_address"] not in [d.get("ip_address") for d in discovered]:
@@ -240,6 +248,63 @@ class PrinterDiscoveryService:
             except:
                 pass
         return None
+
+    def _udp_broadcast_discover(self, timeout: float = 3.0) -> List[Dict[str, Any]]:
+        """
+        UDP broadcast discovery on port 2021 (Official Bambu Lab protocol)
+        This is the same method used by OrcaSlicer and Bambu Studio
+        """
+        discovered = []
+        
+        try:
+            # Create UDP socket for broadcast
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.settimeout(timeout)
+            
+            # Bambu Lab discovery message
+            discovery_msg = json.dumps({"cmd": "discover"})
+            broadcast_addr = ('<broadcast>', self.BAMBU_SSDP_PORT)
+            
+            logger.info(f"Sending UDP broadcast to port {self.BAMBU_SSDP_PORT}...")
+            sock.sendto(discovery_msg.encode(), broadcast_addr)
+            
+            # Collect responses
+            end_time = time.time() + timeout
+            while time.time() < end_time:
+                try:
+                    data, addr = sock.recvfrom(4096)
+                    response = json.loads(data.decode('utf-8'))
+                    
+                    # Parse printer info from response
+                    printer_info = {
+                        "printer_id": response.get("dev_id", f"BAMBU_{addr[0].replace('.', '_')}"),
+                        "printer_name": response.get("name", f"Bambu Lab at {addr[0]}"),
+                        "ip_address": addr[0],
+                        "model": response.get("dev_model_name", "Bambu Lab"),
+                        "serial": response.get("dev_id", ""),
+                        "discovery_method": "udp_broadcast"
+                    }
+                    
+                    # Check for duplicates
+                    if printer_info["ip_address"] not in [d.get("ip_address") for d in discovered]:
+                        discovered.append(printer_info)
+                        logger.info(f"UDP response from {addr[0]}: {response.get('name', 'Unknown')}")
+                    
+                except socket.timeout:
+                    break
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Invalid JSON from {addr[0]}: {e}")
+                except Exception as e:
+                    logger.debug(f"Error parsing UDP response: {e}")
+            
+            sock.close()
+            logger.info(f"UDP broadcast discovery found {len(discovered)} printer(s)")
+            
+        except Exception as e:
+            logger.error(f"UDP broadcast discovery failed: {e}")
+        
+        return discovered
 
     def _check_mdns_hostnames(self) -> List[Dict[str, Any]]:
         """Check common Bambu Lab mDNS hostnames (very fast)"""
