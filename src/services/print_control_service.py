@@ -207,8 +207,8 @@ class PrintControlService:
             
             # Get printer details from database (don't use empty config values)
             printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
-            if not printer or not printer.ip or not printer.access_code:
-                logger.error(f"❌ Printer not found or missing IP/access_code: {printer_id}")
+            if not printer or not printer.printer_ip or not printer.access_code:
+                logger.error(f"❌ Printer not found or missing printer_ip/access_code: {printer_id}")
                 job.status = "failed"
                 queue_item.status = "failed"
                 self.db.commit()
@@ -216,7 +216,7 @@ class PrintControlService:
             
             try:
                 ftps_client = BambuFTPSClient(
-                    host=printer.ip,
+                    host=printer.printer_ip,
                     access_code=printer.access_code,
                     port=990,
                     timeout=60
