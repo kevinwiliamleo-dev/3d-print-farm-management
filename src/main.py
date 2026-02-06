@@ -52,14 +52,30 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized successfully")
     
-    # Initialize global Bambu MQTT client for A1 printer
+    # Initialize global Bambu MQTT client from database
     logger.info("Initializing Bambu Lab MQTT client...")
-    bambu_client = initialize_bambu_client(
-        printer_id=BAMBU_SERIAL,
-        printer_ip=BAMBU_PRINTER_IP,
-        access_code=BAMBU_ACCESS_CODE,
-        use_lan_mode=True
-    )
+    from src.database.db import Printer
+    db = next(get_db())
+    first_printer = db.query(Printer).first()
+    
+    if first_printer and first_printer.printer_id:
+        bambu_client = initialize_bambu_client(
+            printer_id=first_printer.printer_id,
+            printer_ip=first_printer.printer_ip,
+            access_code=first_printer.access_code,
+            use_lan_mode=True
+        )
+        logger.info(f"✅ MQTT initialized for: {first_printer.printer_name} ({first_printer.printer_id}) at {first_printer.printer_ip}")
+    else:
+        # Fallback to env vars if no printer in database
+        bambu_client = initialize_bambu_client(
+            printer_id=BAMBU_SERIAL,
+            printer_ip=BAMBU_PRINTER_IP,
+            access_code=BAMBU_ACCESS_CODE,
+            use_lan_mode=True
+        )
+        logger.warning("⚠️ No printer in database, using environment variables (may not connect)")
+    db.close()
     
     # Handler for when print is completed successfully
     def handle_print_complete():
