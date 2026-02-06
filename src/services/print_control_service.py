@@ -202,13 +202,22 @@ class PrintControlService:
             # Upload file to printer SD card via FTPS
             logger.info(f"📤 Uploading file to printer SD card: {file_path}")
             from src.services.ftps_service import BambuFTPSClient
-            from src.config import BAMBU_PRINTER_IP, BAMBU_ACCESS_CODE
             from src.api.websocket import broadcast_upload_progress_sync
+            from src.database.db import Printer
+            
+            # Get printer details from database (don't use empty config values)
+            printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
+            if not printer or not printer.ip or not printer.access_code:
+                logger.error(f"❌ Printer not found or missing IP/access_code: {printer_id}")
+                job.status = "failed"
+                queue_item.status = "failed"
+                self.db.commit()
+                return False
             
             try:
                 ftps_client = BambuFTPSClient(
-                    host=BAMBU_PRINTER_IP,
-                    access_code=BAMBU_ACCESS_CODE,
+                    host=printer.ip,
+                    access_code=printer.access_code,
                     port=990,
                     timeout=60
                 )
