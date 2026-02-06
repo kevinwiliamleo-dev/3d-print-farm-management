@@ -49,7 +49,7 @@ services:
 
   # Watchtower - Auto update dari Git (optional)
   watchtower:
-    image: containrrr/watchtower
+    image: containrrr/watchtower:latest
     container_name: 3d-farm-watchtower
     restart: unless-stopped
     volumes:
