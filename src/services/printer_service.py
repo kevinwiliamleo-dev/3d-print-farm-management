@@ -83,7 +83,17 @@ class PrinterService:
                 "printer_name": p.printer_name,
                 "status": p.status,
                 "mqtt_connected": p.mqtt_connected,
-                "auto_continue": p.auto_continue
+                "auto_continue": p.auto_continue,
+                "nozzle_temp": p.nozzle_temp,
+                "nozzle_target_temp": p.nozzle_target_temp,
+                "bed_temp": p.bed_temp,
+                "bed_target_temp": p.bed_target_temp,
+                "print_progress": p.print_progress,
+                "remaining_time": p.remaining_time,
+                "current_file": p.current_file,
+                "print_error": p.print_error,
+                "model": p.model,
+                "printer_ip": p.printer_ip
             }
             for p in printers
         ]
