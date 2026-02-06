@@ -219,13 +219,22 @@ export const Dashboard: React.FC = () => {
         return list.map(newPrinter => {
           const existing = prev.find(p => p.printerId === newPrinter.printerId);
           if (existing) {
-            // Merge: preserve runtime data, update static fields
+            // Merge: preserve runtime data, update static fields AND temperature
             return {
-              ...existing, // Keep MQTT data (progress, temp, layers, etc.)
+              ...existing, // Keep MQTT data (progress, layers, etc.)
               printerName: newPrinter.printerName,
               status: newPrinter.status,
               mqttConnected: newPrinter.mqttConnected,
               autoContinue: newPrinter.autoContinue, // Update toggle state
+              // Update temperature data from API
+              nozzleTemp: newPrinter.nozzleTemp,
+              nozzleTargetTemp: newPrinter.nozzleTargetTemp,
+              bedTemp: newPrinter.bedTemp,
+              bedTargetTemp: newPrinter.bedTargetTemp,
+              chamberTemp: newPrinter.chamberTemp,
+              remainingTime: newPrinter.remainingTime,
+              currentFile: newPrinter.currentFile,
+              printError: newPrinter.printError,
             };
           }
           return newPrinter; // New printer
