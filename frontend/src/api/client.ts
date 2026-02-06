@@ -322,7 +322,20 @@ class PrintFarmClient {
   private apiClient: AxiosInstance;
   private baseURL: string;
 
-  constructor(baseURL: string = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5051') {
+  constructor(baseURL?: string) {
+    // Auto-detect backend URL if not provided
+    if (!baseURL || baseURL === '') {
+      const envUrl = process.env.REACT_APP_BACKEND_URL;
+      if (envUrl && envUrl !== '') {
+        baseURL = envUrl;
+      } else {
+        // Auto-detect: Use same hostname as frontend, port 5051
+        const protocol = window.location.protocol; // http: or https:
+        const hostname = window.location.hostname; // e.g., 192.168.4.197 or localhost
+        baseURL = `${protocol}//${hostname}:5051`;
+      }
+    }
+    
     this.baseURL = baseURL;
     this.apiClient = axios.create({
       baseURL: `${baseURL}/api`,
