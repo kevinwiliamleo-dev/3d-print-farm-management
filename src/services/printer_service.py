@@ -65,35 +65,46 @@ class PrinterService:
             return None
         
         return {
-            "printer_id": printer.printer_id,
-            "printer_name": printer.printer_name,
-            "status": printer.status,
-            "mqtt_connected": printer.mqtt_connected,
-            "auto_continue": printer.auto_continue,
+            "printer_id": printer.printer_id or "",
+            "printer_name": printer.printer_name or "Unknown Printer",
+            "status": printer.status or "offline",
+            "mqtt_connected": printer.mqtt_connected or False,
+            "auto_continue": printer.auto_continue or False,
+            "nozzle_temp": printer.nozzle_temp or 0.0,
+            "nozzle_target_temp": printer.nozzle_target_temp or 0.0,
+            "bed_temp": printer.bed_temp or 0.0,
+            "bed_target_temp": printer.bed_target_temp or 0.0,
+            "print_progress": printer.print_progress or 0,
+            "remaining_time": printer.remaining_time or 0,
+            "current_file": printer.current_file or "",
+            "print_error": printer.print_error or "",
+            "model": printer.model or "",
+            "printer_ip": printer.printer_ip or "",
             "created_at": printer.created_at,
             "updated_at": printer.updated_at
         }
+
 
     def get_all_printers(self) -> list:
         """Get all registered printers"""
         printers = self.db.query(Printer).all()
         return [
             {
-                "printer_id": p.printer_id,
-                "printer_name": p.printer_name,
-                "status": p.status,
-                "mqtt_connected": p.mqtt_connected,
-                "auto_continue": p.auto_continue,
-                "nozzle_temp": p.nozzle_temp,
-                "nozzle_target_temp": p.nozzle_target_temp,
-                "bed_temp": p.bed_temp,
-                "bed_target_temp": p.bed_target_temp,
-                "print_progress": p.print_progress,
-                "remaining_time": p.remaining_time,
-                "current_file": p.current_file,
-                "print_error": p.print_error,
-                "model": p.model,
-                "printer_ip": p.printer_ip
+                "printer_id": p.printer_id or "",
+                "printer_name": p.printer_name or "Unknown Printer",
+                "status": p.status or "offline",
+                "mqtt_connected": p.mqtt_connected or False,
+                "auto_continue": p.auto_continue or False,
+                "nozzle_temp": p.nozzle_temp or 0.0,
+                "nozzle_target_temp": p.nozzle_target_temp or 0.0,
+                "bed_temp": p.bed_temp or 0.0,
+                "bed_target_temp": p.bed_target_temp or 0.0,
+                "print_progress": p.print_progress or 0,
+                "remaining_time": p.remaining_time or 0,
+                "current_file": p.current_file or "",
+                "print_error": p.print_error or "",
+                "model": p.model or "",
+                "printer_ip": p.printer_ip or ""
             }
             for p in printers
         ]
