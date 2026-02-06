@@ -322,19 +322,46 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleAddDiscoveredPrinter = async (printer: DiscoveredPrinter) => {
+    // Prompt for access code
+    const accessCode = window.prompt(
+      `Enter Access Code for ${printer.printer_name}:\n\n` +
+      `You can find it in Bambu Studio:\n` +
+      `Settings → Network → Access Code`,
+      ''
+    );
+    
+    if (!accessCode || accessCode.trim() === '') {
+      setMessage({ type: 'error', text: 'Access code is required' });
+      return;
+    }
+    
     setIsLoading(true);
     try {
-      await printFarmClient.registerPrinter(printer.printer_id, printer.printer_name);
-      await loadPrinters();
-      setShowAddModal(false);
-      setDiscoveredPrinters([]);
-      setMessage({ type: 'success', text: `Printer added: ${printer.printer_name}` });
-    } catch (e: any) {
-      if (e.response?.status === 400) {
-        setMessage({ type: 'error', text: 'Printer already registered' });
+      // Use new discovery endpoint with full credentials
+      const response = await fetch(`${window.location.protocol}//${window.location.hostname}:5051/api/discovery/add-discovered`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ip: printer.ip_address,
+          name: printer.printer_name,
+          serial: printer.printer_id,
+          model: printer.model || 'Bambu Lab',
+          access_code: accessCode.trim()
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        await loadPrinters();
+        setShowAddModal(false);
+        setDiscoveredPrinters([]);
+        setMessage({ type: 'success', text: `Printer added: ${printer.printer_name}` });
       } else {
-        setMessage({ type: 'error', text: e.message || 'Failed to add printer' });
+        setMessage({ type: 'error', text: result.message || 'Failed to add printer' });
       }
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e.message || 'Failed to add printer' });
     } finally {
       setIsLoading(false);
     }
