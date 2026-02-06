@@ -167,6 +167,10 @@ export const Dashboard: React.FC = () => {
 
   // Check all kits on mount and poll every 5 seconds
   useEffect(() => {
+    // DISABLED: Kit feature not in use
+    // Prevents 500 errors from legacy /kit/camera endpoint
+    return; // Early return to skip kit polling
+    
     // Initial check
     kits.forEach(kit => {
       checkKitStatus(kit.id, kit.ip);
