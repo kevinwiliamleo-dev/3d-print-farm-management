@@ -118,7 +118,7 @@ async def add_discovered_printer(
         
         # Check if printer already exists
         existing = db.query(Printer).filter(
-            Printer.serial_number == printer_data['serial']
+            Printer.printer_id == printer_data['serial']
         ).first()
         
         if existing:
@@ -126,34 +126,35 @@ async def add_discovered_printer(
             return {
                 "success": False,
                 "message": "Printer already exists in database",
-                "printer_id": existing.id
+                "printer_id": existing.printer_id
             }
         
-        # Create new printer
+        # Create new printer with correct field names
         new_printer = Printer(
-            name=printer_data['name'],
-            ip_address=printer_data['ip'],
-            serial_number=printer_data['serial'],
-            access_code=printer_data['access_code'],
-            model=printer_data.get('model', 'Unknown'),
+            printer_id=printer_data['serial'],  # Use serial as primary key
+            printer_name=printer_data['name'],
+            printer_ip=printer_data['ip'],
+            access_code=printer_data['access_code'],  # Store access code in DB
+            model=printer_data.get('model', 'Bambu Lab A1'),
             status='idle',
-            is_active=True
+            is_active=True,
+            mqtt_connected=False
         )
         
         db.add(new_printer)
         db.commit()
         db.refresh(new_printer)
         
-        logger.info(f"✅ Added printer: {new_printer.name} ({new_printer.serial_number})")
+        logger.info(f"✅ Added printer: {new_printer.printer_name} ({new_printer.printer_id})")
         
         return {
             "success": True,
             "message": "Printer added successfully",
             "printer": {
-                "id": new_printer.id,
-                "name": new_printer.name,
-                "ip": new_printer.ip_address,
-                "serial": new_printer.serial_number,
+                "id": new_printer.printer_id,
+                "name": new_printer.printer_name,
+                "ip": new_printer.printer_ip,
+                "serial": new_printer.printer_id,
                 "model": new_printer.model,
                 "status": new_printer.status
             }

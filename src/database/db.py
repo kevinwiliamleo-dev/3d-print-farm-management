@@ -175,6 +175,7 @@ class Printer(Base):
     printer_id = Column(String(100), primary_key=True, index=True)
     printer_name = Column(String(255), nullable=False)
     printer_ip = Column(String(50), nullable=True)  # IP address for LAN mode
+    access_code = Column(String(50), nullable=True)  # Access code for MQTT/FTPS auth
     model = Column(String(100), default="Bambu Lab A1")
     status = Column(String(50), default="idle")  # idle, printing, paused, offline, error
     last_heartbeat = Column(DateTime, nullable=True)
