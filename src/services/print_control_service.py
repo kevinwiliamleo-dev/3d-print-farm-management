@@ -70,10 +70,17 @@ class PrintControlService:
             self._processing_completion = True  # Set guard flag
             logger.info("🎉 Printer became idle - checking for job completion")
             
+            # CRITICAL: Expire all cached objects to get fresh data from database
+            # This fixes stale session issues in container/Docker environments
+            self.db.expire_all()
+            logger.info("🔄 Database session refreshed (expire_all)")
+            
             # Find any running/paused queue item
             active_queue = self.db.query(Queue).filter(
                 Queue.status.in_(["running", "paused"])
             ).first()
+            
+            logger.info(f"📊 Active queue search result: {active_queue.queue_id if active_queue else 'None'}")
             
             if active_queue:
                 # Validate print has been running for minimum duration (prevent false completion during upload/start)
@@ -103,16 +110,21 @@ class PrintControlService:
                     del self._last_running_time[queue_id]
             else:
                 # No active job, but printer is idle - check if there's pending job
-                logger.info("No active job, checking for pending jobs to start")
+                logger.info("No active job found, checking for pending jobs to auto-start...")
+                
+                # Refresh session again before querying pending jobs
+                self.db.expire_all()
+                
                 pending_queue = self.db.query(Queue).filter(
                     Queue.status == "pending"
                 ).order_by(Queue.position_in_queue).first()
                 
                 if pending_queue:
-                    logger.info(f"Found pending job {pending_queue.queue_id}, starting it")
+                    logger.info(f"✅ Found pending job queue_id={pending_queue.queue_id}, printer_id={pending_queue.printer_id}")
+                    logger.info(f"🚀 Auto-starting next job in queue...")
                     self.start_next_job(pending_queue.printer_id)
                 else:
-                    logger.info("No pending jobs in queue")
+                    logger.info("📭 No pending jobs in queue - queue is empty")
                     
         except Exception as e:
             logger.error(f"Error in print complete callback: {str(e)}")
@@ -135,6 +147,11 @@ class PrintControlService:
         Returns: True if job started successfully
         """
         try:
+            # CRITICAL: Expire all cached objects to get fresh data from database
+            # This fixes stale session issues in container/Docker environments
+            self.db.expire_all()
+            logger.info(f"🔄 start_next_job: Database session refreshed for printer_id={printer_id}")
+            
             # Get next job from queue
             queue_item = self.db.query(Queue).filter(
                 Queue.printer_id == printer_id,
@@ -373,6 +390,10 @@ class PrintControlService:
         Returns: True if print restarted successfully
         """
         try:
+            # CRITICAL: Expire all cached objects to get fresh data from database
+            self.db.expire_all()
+            logger.info(f"🔄 _restart_print_for_loop: Database session refreshed")
+            
             # Get the specific queue item (should be status="running")
             queue_item = self.db.query(Queue).filter(Queue.queue_id == queue_id).first()
             
@@ -433,13 +454,22 @@ class PrintControlService:
             # Upload file and start print (same as start_next_job)
             logger.info(f"📤 Uploading file to printer for loop continuation: {file_path}")
             from src.services.ftps_service import BambuFTPSClient
-            from src.config import BAMBU_PRINTER_IP, BAMBU_ACCESS_CODE
             from src.api.websocket import broadcast_upload_progress_sync
+            from src.database.db import Printer
+            
+            # Get printer details from database (not hardcoded config)
+            printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
+            if not printer or not printer.printer_ip or not printer.access_code:
+                logger.error(f"❌ Printer not found or missing printer_ip/access_code: {printer_id}")
+                job.status = "failed"
+                queue_item.status = "failed"
+                self.db.commit()
+                return False
             
             try:
                 ftps_client = BambuFTPSClient(
-                    host=BAMBU_PRINTER_IP,
-                    access_code=BAMBU_ACCESS_CODE,
+                    host=printer.printer_ip,
+                    access_code=printer.access_code,
                     port=990,
                     timeout=60
                 )
@@ -592,6 +622,10 @@ class PrintControlService:
         Returns: True if handled successfully
         """
         try:
+            # CRITICAL: Expire all cached objects to get fresh data from database
+            self.db.expire_all()
+            logger.info(f"🔄 handle_print_completion: Database session refreshed")
+            
             if not self.current_queue_id or not self.current_job_id:
                 logger.warning("No current job to handle completion")
                 return False
@@ -703,11 +737,20 @@ class PrintControlService:
                 
                 # Check auto_continue setting before starting next job
                 from src.database.db import Printer
+                
+                # Refresh session before querying printer settings
+                self.db.expire_all()
                 printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
                 
-                if printer and printer.auto_continue:
+                # Handle auto_continue: default to True if None (for backwards compatibility)
+                # This ensures queue continues if field was added after printer was created
+                auto_continue = printer.auto_continue if (printer and printer.auto_continue is not None) else True
+                
+                logger.info(f"📊 Printer auto_continue setting: {auto_continue} (raw value: {printer.auto_continue if printer else 'None'})")
+                
+                if auto_continue:
                     # Auto continue enabled - start next job immediately
-                    logger.info(f"✅ Auto-continue enabled, starting next job...")
+                    logger.info(f"✅ Auto-continue enabled, checking for next job in queue...")
                     return self.start_next_job(printer_id)
                 else:
                     # Auto continue disabled - wait for manual start
