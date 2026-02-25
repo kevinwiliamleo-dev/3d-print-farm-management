@@ -93,6 +93,29 @@ git push origin main
 
 ## 🆕 Recent Updates (February 2026)
 
+**Orange Pi kit_api.py GPIO Status Fix (February 26, 2026):**
+- ✅ **Status Endpoint Baca GPIO Hardware Langsung (bukan variabel memory)**
+  - **Problem**: `/kit/fan?state=status` membaca variabel Python `current_fan_state` (in-memory, default `False`). Jika service restart, variabel reset ke `False` meskipun GPIO pin masih HIGH → status salah
+  - **Root Cause**: State disimpan di variabel Python, bukan dibaca dari hardware GPIO aktual
+  - **Solution**: Hapus variabel `current_fan_state`. Tambah fungsi `read_gpio_state()` yang eksekusi `gpio read 16` langsung ke hardware. Status endpoint sekarang selalu mencerminkan kondisi GPIO aktual
+  - **Deploy Method**: SSH via Paramiko → SFTP upload → `systemctl restart kit_api.service`
+  - **Verified**: Status akurat setelah restart: OFF→ON→OFF mengikuti GPIO hardware
+  - **File**: `/root/kit_api.py` (Orange Pi 192.168.4.197)
+
+**Bed Cooling Fan Spam Fix + Corrupt MQTT Guard (February 26, 2026):**
+- ✅ **Fan HTTP Spam Dihilangkan**
+  - **Problem**: MQTT Bambu mengirim update setiap 2-5 detik (bukan 30s seperti asumsi awal). Setiap MQTT message memanggil `await _control_fan("on")` → ratusan HTTP request per menit ke Orange Pi
+  - **Root Cause**: Keep-alive `fan=ON` ada di branch "already cooling" yang dieksekusi setiap MQTT tick
+  - **Solution**: Hapus `_control_fan("on")` dari branch "already cooling". GPIO Orange Pi mempertahankan state-nya sendiri — cukup kirim ON sekali di `_start_cooling()`, OFF sekali di `_stop_cooling()`
+  - **Commit**: `e220f30`
+
+- ✅ **Guard Terhadap Data MQTT Corrupt (300°C)**
+  - **Problem**: MQTT Bambu kadang mengirim `bed_temper: 300.4°C` (tidak realistis). Ini menyebabkan sistem pendingin terus berjalan selamanya karena suhu tidak pernah turun ke threshold
+  - **Root Cause**: Beberapa jenis MQTT message dari Bambu mengandung nilai field yang corrupt/cross-contaminated
+  - **Solution**: Tambah sanity check di awal `update_temperature()`: jika `bed_temp > 150.0°C` → log warning dan return langsung (Bambu A1 max bed temp = 110°C)
+  - **Commit**: `e220f30`
+  - **File**: `src/services/bed_cooling_service.py`
+
 **Bed Cooling Fan Keep-Alive Fix (February 26, 2026):**
 - ✅ **Root Cause Ditemukan & Diperbaiki: Fan Mati Setelah Beberapa Detik**
   - **Problem**: Fan nyala sebentar lalu mati sendiri, bahkan saat di-ON manual lewat UI
@@ -1658,6 +1681,9 @@ This is a personal project for 3D print farm automation. For questions or sugges
 **Last Updated:** February 26, 2026
 
 **Recent Fixes:**
+- ✅ Orange Pi `kit_api.py` GPIO status baca hardware langsung (Feb 26, 2026)
+- ✅ Bed cooling fan spam dihilangkan — state-based ON/OFF sekali (Feb 26, 2026) — commit `e220f30`
+- ✅ Guard 300°C corrupt MQTT data di bed cooling service (Feb 26, 2026) — commit `e220f30`
 - ✅ Bed cooling fan keep-alive (Feb 26, 2026) — `asyncio.create_task` diganti `await` langsung
 - ✅ Frontend fan toggle pakai actual ESP32 state (Feb 26, 2026)
 - ✅ Print completion timing validation (30s minimum)
