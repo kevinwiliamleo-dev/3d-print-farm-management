@@ -48,10 +48,11 @@ class BedCoolingService:
         self.cooling_state = CoolingState()
         
         # Cooling parameters
-        self.temp_threshold = 2.0  # Only activate if diff > 2°C
-        self.temp_tolerance = 1.0   # Turn off when within 1°C of target
-        self.min_cooling_time = 30  # Minimum 30 seconds before checking
-        self.check_interval = 5     # Check every 5 seconds
+        self.temp_threshold = 2.0      # Only activate if diff > 2°C
+        self.temp_tolerance = 1.0      # Turn off when within 1°C of target
+        self.min_cooling_time = 30     # Minimum 30 seconds before checking
+        self.check_interval = 5        # Check every 5 seconds
+        self.ambient_threshold = 40.0  # Activate fan when target=0 but bed > this (°C)
         
         # Kit configuration (will be set from settings)
         self.kit_ip: Optional[str] = None
@@ -59,17 +60,20 @@ class BedCoolingService:
         
         logger.info(f"🌡️ Bed Cooling Service initialized for printer: {printer_id}")
     
-    def configure_kit(self, kit_ip: str, enabled: bool = True):
+    def configure_kit(self, kit_ip: str, enabled: bool = True, ambient_threshold: float = 40.0):
         """
         Configure external Kit for cooling
         
         Args:
             kit_ip: IP address of ESP32 Kit (e.g. "192.168.1.100")
             enabled: Enable/disable auto cooling feature
+            ambient_threshold: Activate fan when bed heater is OFF but bed > this temp (°C).
+                               Default 40°C — fan kicks in if bed still hot after print ends.
         """
         self.kit_ip = kit_ip
         self.kit_enabled = enabled
-        logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}")
+        self.ambient_threshold = ambient_threshold
+        logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}, AmbientThreshold={ambient_threshold}°C")
     
     async def _control_fan(self, state: str) -> bool:
         """
@@ -126,13 +130,27 @@ class BedCoolingService:
         if not self.kit_enabled or not self.kit_ip:
             return
         
-        # Skip if no valid target (target = 0 means no active heating/cooling)
+        # Skip if no valid target (target = 0 means bed heater OFF after print)
+        # Special case: still activate fan if bed is hot (ambient cooling mode)
         if bed_target_temp <= 0:
-            # If currently cooling, stop it
-            if self.cooling_state.is_cooling:
-                logger.info("🛑 No target temp, stopping cooling")
-                await self._stop_cooling()
-            return
+            if bed_temp > self.ambient_threshold:
+                # Bed heater OFF but bed still hot → cool to ambient threshold
+                if not self.cooling_state.is_cooling:
+                    logger.info(
+                        f"🌡️ Bed heater OFF but bed hot ({bed_temp:.1f}°C > {self.ambient_threshold:.1f}°C) — "
+                        f"activating fan for ambient cooling"
+                    )
+                    await self._start_cooling(bed_temp, self.ambient_threshold)
+                # else: already cooling — let normal SCENARIO 2 logic handle stop
+                # Fall through so scenario 2 (stop when cool enough) still runs
+                # Update bed_target_temp to ambient_threshold for comparison below
+                bed_target_temp = self.ambient_threshold
+            else:
+                # Bed already cool, stop if still running
+                if self.cooling_state.is_cooling:
+                    logger.info(f"🛑 Bed target=0 and bed cool ({bed_temp:.1f}°C ≤ {self.ambient_threshold:.1f}°C), stopping fan")
+                    await self._stop_cooling()
+                return
         
         current_time = time.time()
         temp_diff = bed_temp - bed_target_temp
