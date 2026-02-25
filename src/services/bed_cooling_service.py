@@ -61,6 +61,10 @@ class BedCoolingService:
         self.kit_ip: Optional[str] = None
         self.kit_enabled: bool = False
         
+        # Keep-alive task: sends fan=ON every 10s while cooling, independent of MQTT
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self.keepalive_interval = 10  # seconds between keep-alive sends
+        
         logger.info(f"🌡️ Bed Cooling Service initialized for printer: {printer_id}")
     
     def configure_kit(self, kit_ip: str, enabled: bool = True, ambient_threshold: float = None):
@@ -211,10 +215,7 @@ class BedCoolingService:
                         f"(elapsed: {int(elapsed)}s, dropped: {temp_drop:.1f}°C)"
                     )
                     self.cooling_state.last_temp_check = current_time
-                    # KEEP-ALIVE: Re-send fan=ON every 30s to prevent ESP32 watchdog auto-off
-                    # Also handles: reboots, manual toggle OFF, network blips
-                    logger.debug("🔄 Fan keep-alive: re-sending ON command to ESP32")
-                    await self._control_fan("on")
+                    # Keep-alive is handled by _keepalive_loop() background task (every 10s)
         
         # =================================================================
         # SCENARIO 2: Target reached → STOP fan
@@ -241,6 +242,24 @@ class BedCoolingService:
         # Fan already OFF → don't start yet (hysteresis gap)
         # =================================================================
     
+    async def _keepalive_loop(self):
+        """Background task: send fan=ON every keepalive_interval seconds while cooling.
+        Prevents ESP32 watchdog auto-off and handles brief reboots/network blips.
+        """
+        try:
+            while self.cooling_state.is_cooling:
+                await asyncio.sleep(self.keepalive_interval)
+                if not self.cooling_state.is_cooling:
+                    break  # Stopped while sleeping
+                logger.debug(f"🔄 Fan keep-alive ping ({self.keepalive_interval}s interval)")
+                success = await self._control_fan("on")
+                if not success:
+                    logger.warning("⚠️ Keep-alive fan=ON failed (will retry next interval)")
+        except asyncio.CancelledError:
+            logger.debug("🛑 Fan keep-alive task cancelled")
+        except Exception as e:
+            logger.error(f"❌ Keep-alive loop error: {e}")
+
     async def _start_cooling(self, bed_temp: float, bed_target_temp: float):
         """Start cooling cycle - turn ON fan"""
         self.cooling_state.is_cooling = True
@@ -258,6 +277,12 @@ class BedCoolingService:
             logger.info("✅ Cooling fan turned ON")
         else:
             logger.error("❌ Failed to turn ON cooling fan")
+        
+        # Start background keep-alive task
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        logger.debug(f"✅ Fan keep-alive task started (interval: {self.keepalive_interval}s)")
     
     async def _stop_cooling(self):
         """Stop cooling cycle - turn OFF fan"""
@@ -266,6 +291,11 @@ class BedCoolingService:
         
         logger.info("🛑 Stopping bed cooling")
         self._last_fan_action_time = time.time()
+        
+        # Cancel keep-alive task first
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+            self._keepalive_task = None
         
         # Turn OFF Kit fan
         success = await self._control_fan("off")
