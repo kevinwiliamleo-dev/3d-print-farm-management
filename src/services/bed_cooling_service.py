@@ -54,7 +54,6 @@ class BedCoolingService:
         self.stop_tolerance = 2.0      # STOP fan when bed <= target + 2°C
         self.min_fan_action_interval = 60  # Min 60s between fan state changes (prevent rapid cycling)
         self.check_interval = 5        # Check every 5 seconds
-        self.ambient_threshold = 33.0  # Activate fan when target=0 but bed > this (°C)
         self._last_fan_action_time: float = 0  # Track last time fan was toggled
         
         # Kit configuration (will be set from settings)
@@ -63,22 +62,17 @@ class BedCoolingService:
         
         logger.info(f"🌡️ Bed Cooling Service initialized for printer: {printer_id}")
     
-    def configure_kit(self, kit_ip: str, enabled: bool = True, ambient_threshold: float = None):
+    def configure_kit(self, kit_ip: str, enabled: bool = True):
         """
         Configure external Kit for cooling
         
         Args:
             kit_ip: IP address of ESP32 Kit (e.g. "192.168.1.100")
             enabled: Enable/disable auto cooling feature
-            ambient_threshold: Activate fan when bed heater is OFF but bed > this temp (°C).
-                               If not provided, keeps the current value (default 33°C from __init__).
         """
         self.kit_ip = kit_ip
         self.kit_enabled = enabled
-        if ambient_threshold is not None:
-            self.ambient_threshold = ambient_threshold
-        # else: keep __init__ default (33.0°C) — do NOT override with function default
-        logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}, AmbientThreshold={self.ambient_threshold}°C")
+        logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}")
     
     async def _verify_fan_state(self) -> bool:
         """
@@ -162,30 +156,13 @@ class BedCoolingService:
             logger.warning(f"⚠️ Ignoring unrealistic bed_temp {bed_temp:.1f}°C (> 150°C — likely corrupt MQTT data)")
             return
 
-        # Skip if no valid target (target = 0 means bed heater OFF after print)
-        # Special case: still activate fan if bed is hot (ambient cooling mode)
+        # No active target → bed heater is OFF (after print or idle).
+        # Fan only needed when cooling toward a specific target, not for ambient cooling.
         if bed_target_temp <= 0:
-            if bed_temp >= self.ambient_threshold:
-                # Bed heater OFF but bed still hot → cool to ambient threshold
-                if not self.cooling_state.is_cooling:
-                    time_since_last = time.time() - self._last_fan_action_time
-                    if time_since_last >= self.min_fan_action_interval:
-                        logger.info(
-                            f"🌡️ Bed heater OFF but bed hot ({bed_temp:.1f}°C >= {self.ambient_threshold:.1f}°C) — "
-                            f"activating fan for ambient cooling"
-                        )
-                        await self._start_cooling(bed_temp, self.ambient_threshold)
-                    else:
-                        logger.debug(f"⏳ Ambient cooling: waiting {int(self.min_fan_action_interval - time_since_last)}s before restart")
-                    return  # BUG FIX: don't fall through to scenario checks after just starting/waiting
-                # Already cooling in ambient mode — set target for scenario 2 stop check
-                bed_target_temp = self.ambient_threshold
-            else:
-                # Bed already cool, stop if still running
-                if self.cooling_state.is_cooling:
-                    logger.info(f"🛑 Bed target=0 and bed cool ({bed_temp:.1f}°C ≤ {self.ambient_threshold:.1f}°C), stopping fan")
-                    await self._stop_cooling()
-                return
+            if self.cooling_state.is_cooling:
+                logger.info(f"🛑 Bed target cleared (target=0), stopping fan")
+                await self._stop_cooling()
+            return
         
         current_time = time.time()
         temp_diff = bed_temp - bed_target_temp
