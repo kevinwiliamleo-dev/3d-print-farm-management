@@ -48,11 +48,14 @@ class BedCoolingService:
         self.cooling_state = CoolingState()
         
         # Cooling parameters
-        self.temp_threshold = 2.0      # Only activate if diff > 2°C
-        self.temp_tolerance = 1.0      # Turn off when within 1°C of target
-        self.min_cooling_time = 30     # Minimum 30 seconds before checking
+        # HYSTERESIS DESIGN: start_threshold must be > stop_tolerance
+        # This prevents rapid on/off cycling when bed temp fluctuates
+        self.start_threshold = 5.0     # START fan when bed > target + 5°C
+        self.stop_tolerance = 2.0      # STOP fan when bed <= target + 2°C
+        self.min_fan_action_interval = 60  # Min 60s between fan state changes (prevent rapid cycling)
         self.check_interval = 5        # Check every 5 seconds
         self.ambient_threshold = 40.0  # Activate fan when target=0 but bed > this (°C)
+        self._last_fan_action_time: float = 0  # Track last time fan was toggled
         
         # Kit configuration (will be set from settings)
         self.kit_ip: Optional[str] = None
@@ -154,21 +157,29 @@ class BedCoolingService:
         
         current_time = time.time()
         temp_diff = bed_temp - bed_target_temp
+        time_since_last_action = current_time - self._last_fan_action_time
         
         # =================================================================
-        # SCENARIO 1: Bed needs cooling (current > target + threshold)
+        # SCENARIO 1: Bed needs cooling → START fan
+        # Only start if diff > start_threshold AND fan not already on
+        # AND minimum interval since last action (prevent rapid cycling)
         # =================================================================
-        if temp_diff > self.temp_threshold:
+        if temp_diff > self.start_threshold:
             if not self.cooling_state.is_cooling:
-                # Start new cooling cycle
-                logger.info(f"🌡️ Bed cooling needed: {bed_temp:.1f}°C → {bed_target_temp:.1f}°C (diff: {temp_diff:.1f}°C)")
-                await self._start_cooling(bed_temp, bed_target_temp)
+                if time_since_last_action >= self.min_fan_action_interval:
+                    logger.info(
+                        f"🌡️ Bed cooling needed: {bed_temp:.1f}°C → {bed_target_temp:.1f}°C "
+                        f"(diff: {temp_diff:.1f}°C > threshold {self.start_threshold}°C)"
+                    )
+                    await self._start_cooling(bed_temp, bed_target_temp)
+                else:
+                    logger.debug(
+                        f"⏳ Waiting before restart: {int(time_since_last_action)}/{self.min_fan_action_interval}s"
+                    )
             else:
-                # Already cooling, just update progress
+                # Already cooling, log progress every 30 seconds
                 elapsed = current_time - self.cooling_state.start_time
                 temp_drop = self.cooling_state.start_temp - bed_temp
-                
-                # Log progress every 30 seconds
                 if current_time - self.cooling_state.last_temp_check >= 30:
                     logger.info(
                         f"❄️ Cooling in progress: {bed_temp:.1f}°C → {bed_target_temp:.1f}°C "
@@ -177,21 +188,25 @@ class BedCoolingService:
                     self.cooling_state.last_temp_check = current_time
         
         # =================================================================
-        # SCENARIO 2: Target temperature reached (within tolerance)
+        # SCENARIO 2: Target reached → STOP fan
+        # Only stop when bed is truly within stop_tolerance of target
+        # This is the ONLY condition to stop — no time-based early stop
         # =================================================================
-        elif self.cooling_state.is_cooling and temp_diff <= self.temp_tolerance:
+        elif self.cooling_state.is_cooling and temp_diff <= self.stop_tolerance:
             elapsed = current_time - self.cooling_state.start_time
             total_drop = self.cooling_state.start_temp - bed_temp
-            
-            # Only stop if minimum cooling time elapsed (prevent rapid cycling)
-            if elapsed >= self.min_cooling_time or force_check:
-                logger.info(
-                    f"✅ Bed cooling complete! {self.cooling_state.start_temp:.1f}°C → {bed_temp:.1f}°C "
-                    f"(time: {int(elapsed)}s, dropped: {total_drop:.1f}°C)"
-                )
-                await self._stop_cooling()
-            else:
-                logger.debug(f"⏳ Target reached but waiting minimum time ({int(elapsed)}/{self.min_cooling_time}s)")
+            logger.info(
+                f"✅ Bed cooling complete! {self.cooling_state.start_temp:.1f}°C → {bed_temp:.1f}°C "
+                f"(diff: {temp_diff:.1f}°C ≤ stop_tolerance {self.stop_tolerance}°C, "
+                f"time: {int(elapsed)}s, dropped: {total_drop:.1f}°C)"
+            )
+            await self._stop_cooling()
+        
+        # =================================================================
+        # In-between zone (stop_tolerance < diff <= start_threshold):
+        # Fan already ON → keep running (let it cool further)
+        # Fan already OFF → don't start yet (hysteresis gap)
+        # =================================================================
     
     async def _start_cooling(self, bed_temp: float, bed_target_temp: float):
         """Start cooling cycle - turn ON fan"""
@@ -202,6 +217,7 @@ class BedCoolingService:
         self.cooling_state.last_temp_check = time.time()
         
         logger.info(f"🌀 Starting bed cooling: {bed_temp:.1f}°C → {bed_target_temp:.1f}°C")
+        self._last_fan_action_time = time.time()
         
         # Turn ON Kit fan
         success = await self._control_fan("on")
@@ -216,6 +232,7 @@ class BedCoolingService:
             return
         
         logger.info("🛑 Stopping bed cooling")
+        self._last_fan_action_time = time.time()
         
         # Turn OFF Kit fan
         success = await self._control_fan("off")
