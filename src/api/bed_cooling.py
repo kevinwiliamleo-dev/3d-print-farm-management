@@ -12,7 +12,7 @@ from src.api.print_control import get_print_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/printers", tags=["bed-cooling"])
+router = APIRouter(prefix="/api/printers", tags=["bed-cooling"])
 
 
 class BedCoolingConfig(BaseModel):
