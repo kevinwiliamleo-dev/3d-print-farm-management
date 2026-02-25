@@ -155,6 +155,13 @@ class BedCoolingService:
         if not self.kit_enabled or not self.kit_ip:
             return
         
+        # Sanity check: bed temperature above 150°C is physically impossible for Bambu A1 bed
+        # (max bed temp is 110°C). When MQTT sends bad data (e.g. nozzle_temper leaks into
+        # bed_temper field), skip to avoid running fan forever on ghost temperature.
+        if bed_temp > 150.0:
+            logger.warning(f"⚠️ Ignoring unrealistic bed_temp {bed_temp:.1f}°C (> 150°C — likely corrupt MQTT data)")
+            return
+
         # Skip if no valid target (target = 0 means bed heater OFF after print)
         # Special case: still activate fan if bed is hot (ambient cooling mode)
         if bed_target_temp <= 0:
@@ -202,13 +209,11 @@ class BedCoolingService:
                         f"⏳ Waiting before restart: {int(time_since_last_action)}/{self.min_fan_action_interval}s"
                     )
             else:
-                # Already cooling — re-send fan=ON on every MQTT message as keep-alive
-                # This works reliably because update_temperature() is called in an already-running
-                # asyncio loop (bambu_service.py via loop.run_until_complete), so await works here.
-                # No asyncio.create_task needed — that would die when the ephemeral loop closes.
+                # Already cooling — ESP32 maintains fan state until told otherwise.
+                # No need to re-send fan=ON every tick (that causes unnecessary HTTP spam).
+                # Fan was turned ON in _start_cooling() and will be turned OFF in _stop_cooling().
                 elapsed = current_time - self.cooling_state.start_time
                 temp_drop = self.cooling_state.start_temp - bed_temp
-                await self._control_fan("on")  # keep-alive: re-confirm fan ON every MQTT tick
                 if current_time - self.cooling_state.last_temp_check >= 30:
                     logger.info(
                         f"❄️ Cooling in progress: {bed_temp:.1f}°C → {bed_target_temp:.1f}°C "
