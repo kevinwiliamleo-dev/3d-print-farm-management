@@ -84,7 +84,28 @@ function Get-PortainerToken {
         } catch { }
     }
 
-    # Token tidak ada / expired - minta login ulang
+    # Token tidak ada / expired - coba auto-login pakai password tersimpan dulu
+    $config = Get-Config
+    $savedUsername = if ($config -and $config.username) { $config.username } else { "root" }
+    $savedPassword = if ($config -and $config.portainer_password) { $config.portainer_password } else { $null }
+
+    if ($savedPassword) {
+        Write-Host "[...] Token expired, auto-login dengan credentials tersimpan..."
+        try {
+            $body = @{ username = $savedUsername; password = $savedPassword } | ConvertTo-Json
+            $r = Invoke-RestMethod -Uri "$PORTAINER_URL/api/auth" -Method POST -Body $body -ContentType "application/json"
+            $token = $r.jwt
+            $cfg = if ($config) { $config } else { @{} }
+            $cfg.token = $token
+            Save-Config $cfg
+            Write-OK "Auto-login berhasil"
+            return $token
+        } catch {
+            Write-Warn "Auto-login gagal, minta manual login..."
+        }
+    }
+
+    # Fallback: minta input manual
     Write-Warn "Perlu login ke Portainer"
     $username = Read-Host "Username Portainer"
     $password = Read-Host "Password Portainer" -AsSecureString
@@ -97,13 +118,14 @@ function Get-PortainerToken {
         $r = Invoke-RestMethod -Uri "$PORTAINER_URL/api/auth" -Method POST -Body $body -ContentType "application/json"
         $token = $r.jwt
 
-        # Simpan token
+        # Simpan token + password untuk auto-login berikutnya
         $cfg = if ($config) { $config } else { @{} }
         $cfg.token = $token
         $cfg.username = $username
+        $cfg.portainer_password = $plainPassword
         Save-Config $cfg
 
-        Write-OK "Login berhasil - token disimpan"
+        Write-OK "Login berhasil - token & password disimpan"
         return $token
     } catch {
         Write-Fail "Login gagal: $_"
