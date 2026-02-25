@@ -14,11 +14,27 @@ A web-based application to manage and automate 3D printing operations on a Bambu
 - `development` - Active development and new features
 
 ### Development Workflow
-All new features and changes are developed in the `development` branch. After testing and validation, changes are merged to `main` for production deployment.
+Semua perubahan kode dibuat di branch `development`. Setelah test dan validasi, di-merge ke `main` untuk production.
 
 **Branch Creation Date:** January 15, 2026
-- Created `development` branch for ongoing feature development
-- Established workflow: `development` → testing → `main`
+
+**Workflow (sehari-hari):**
+```
+1. Edit kode di VS Code
+2. git commit + git push origin development
+3. GitHub Actions otomatis build Docker image (~3-5 menit)
+4. Jalankan deploy.bat → Portainer API pull image baru dari GHCR
+5. Container di server (192.168.4.67) restart dengan image terbaru
+```
+
+**Deploy ke production (stable):**
+```
+git checkout main
+git merge development
+git push origin main
+→ GitHub Actions build image:main
+→ deploy.bat di-run lagi untuk update server
+```
 
 ## �📋 Project Overview
 
@@ -31,8 +47,10 @@ All new features and changes are developed in the `development` branch. After te
 - **Backend:** Python (FastAPI)
 - **Slicer:** OrcaSlicer (CLI-based automated slicing)
 - **Database:** SQLite with SQLAlchemy ORM
-- **Hardware:** Bambu Lab A1 Combo AMS
-- **Deployment:** Local server
+- **Hardware:** Bambu Lab A1 Combo AMS + ESP32 Kit (bed cooling fan)
+- **Container:** Docker (images di GHCR)
+- **CI/CD:** GitHub Actions → GHCR → Portainer API
+- **Server:** Proxmox VM, IP `192.168.4.67` (Portainer `https://192.168.4.67:9443`)
 
 ---
 
@@ -59,6 +77,13 @@ All new features and changes are developed in the `development` branch. After te
 - **Auto-Eject**: Automatic bed clearing after completion
 - **Status Sync**: Database + UI updates on all state changes
 
+### ❄️ Auto Bed Cooling (ESP32 Kit)
+- **Auto Fan Control**: Fan otomatis nyala saat bed > target+3°C, mati saat ≤ target+2°C
+- **Ambient Mode**: Fan nyala jika bed > 33°C meski heater OFF (target=0)
+- **Keep-Alive**: Fan di-konfirmasi ulang tiap MQTT tick (~30s) — tidak bisa mati sendiri
+- **Hysteresis**: Minimum 60s antara state change untuk mencegah cycling
+- **ESP32 Kit**: `192.168.4.197:5000/kit/fan?state=on|off|status`
+
 ### 📈 History & Tracking
 - Complete print history with timestamps
 - Slicing settings logged per job
@@ -67,6 +92,22 @@ All new features and changes are developed in the `development` branch. After te
 - Print duration analytics
 
 ## 🆕 Recent Updates (February 2026)
+
+**Bed Cooling Fan Keep-Alive Fix (February 26, 2026):**
+- ✅ **Root Cause Ditemukan & Diperbaiki: Fan Mati Setelah Beberapa Detik**
+  - **Problem**: Fan nyala sebentar lalu mati sendiri, bahkan saat di-ON manual lewat UI
+  - **Root Cause**: `bambu_service.py` membuat `asyncio.new_event_loop()` baru tiap MQTT message, lalu `loop.close()` setelah selesai. `asyncio.create_task(keepalive)` yang dibuat di dalam loop itu langsung mati ketika loop ditutup — fan hanya dapat satu perintah ON, tidak pernah dikonfirmasi ulang.
+  - **Solution**: Hapus semua `asyncio.create_task()` keepalive. Ganti dengan `await self._control_fan("on")` langsung di branch "already cooling" setiap MQTT tick (~30s). Karena dipanggil dalam `loop.run_until_complete()` yang masih berjalan, HTTP request ke ESP32 selalu berhasil sebelum loop ditutup.
+  - **Verified**: Fan dimatikan manual → backend re-send `ON` dalam ≤35 detik
+  - **Commit**: `8d72169`
+  - **File**: `src/services/bed_cooling_service.py`
+
+- ✅ **Frontend Toggle Fan Fix**
+  - **Problem**: Toggle fan di Settings memakai cached UI state (stale) → salah arah toggle
+  - **Solution**: Query actual state dari ESP32 (`/kit/fan?state=status`) sebelum toggle
+  - **Added**: Auto-refresh fan status saat Settings tab dibuka
+  - **Commit**: `d6f58f7`
+  - **File**: `frontend/src/components/Dashboard.tsx`
 
 **Critical Bug Fixes (February 3, 2026):**
 - ✅ **Fixed Premature Print Completion Bug**
@@ -797,12 +838,22 @@ class OrcaSlicerManager:
 
 ---
 
-## 🔧 Current Printer Configuration
+## 🔧 Hardware & Infrastructure
+
+### Server
+```
+Host:        Proxmox VM
+IP:          192.168.4.67
+Portainer:   https://192.168.4.67:9443  (Stack ID: 44, Name: 3d-print-farm)
+Frontend:    http://192.168.4.67:3051
+Backend API: http://192.168.4.67:5051
+```
 
 ### Bambu Lab A1 Combo AMS
 ```
 Printer IP:      192.168.4.101
 Printer ID:      03900D5A2402051
+Serial:          03900D5A2402051
 MQTT Port:       8883 (TLS)
 MQTT Username:   bblp
 Access Code:     34782589
@@ -810,7 +861,17 @@ FTP Port:        990 (Implicit FTPS)
 Mode:            LAN Mode (local network)
 ```
 
-### Connection Status (Last Tested: January 3, 2026)
+### ESP32 Cooling Kit
+```
+IP:        192.168.4.197
+Port:      5000
+Endpoints:
+  GET  /kit/fan?state=on     → Turn fan ON
+  GET  /kit/fan?state=off    → Turn fan OFF
+  GET  /kit/fan?state=status → {"status": "ON"|"OFF"}
+```
+
+### Connection Status (Last Tested: February 26, 2026)
 - ✅ MQTT Connection: Working
 - ✅ Status Push: Receiving printer status (real-time)
 - ✅ Auto-Eject: Working (G28 X Y + G1 Y 230)
@@ -822,6 +883,7 @@ Mode:            LAN Mode (local network)
 - ✅ AMS Status: Receiving tray data via MQTT
 - ✅ AMS Filament Settings: ams_filament_setting command working
 - ✅ AMS Load/Unload: ams_change_filament & unload_filament working
+- ✅ Bed Cooling Fan: Working (keep-alive via MQTT tick, commit `8d72169`)
 
 ---
 
@@ -897,6 +959,30 @@ docker logs 3d-farm-backend | grep "Initializing MQTT"
 | No time estimate | Missing slice_info | Check `Metadata/slice_info.config` exists |
 | "Invalid gcode" | Wrong structure | Verify `Metadata/plate_1.gcode` exists |
 
+### Bed Cooling Fan Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Fan nyala sebentar lalu mati | `asyncio.create_task()` di-kill oleh ephemeral loop | Fixed commit `8d72169`: gunakan `await _control_fan("on")` langsung di MQTT tick |
+| Fan tidak nyala sama sekali | `kit_enabled=False` atau `kit_ip` None | Cek konfigurasi via `POST /bed-cooling/configure` |
+| Toggle fan di UI salah arah | Frontend pakai cached state (stale) | Fixed commit `d6f58f7`: query ESP32 state sebelum toggle |
+| Fan ON tapi suhu tidak turun | Fan tidak diarahkan ke bed | Periksa posisi fisik fan |
+| ESP32 tidak merespons | Network issue / ESP32 restart | Fan state di-konfirmasi ulang tiap MQTT tick (~30s) — recover otomatis |
+
+**Diagnosis:**
+```powershell
+# Cek status cooling backend
+Invoke-RestMethod "http://192.168.4.67:5051/api/printers/BAMBU_192_168_4_101/bed-cooling/status" | ConvertTo-Json
+
+# Cek actual fan state di ESP32
+Invoke-RestMethod "http://192.168.4.197:5000/kit/fan?state=status" | ConvertTo-Json
+
+# Test keep-alive: matikan fan, tunggu 35s, seharusnya backend nyalakan ulang
+Invoke-RestMethod "http://192.168.4.197:5000/kit/fan?state=off"
+Start-Sleep -Seconds 35
+Invoke-RestMethod "http://192.168.4.197:5000/kit/fan?state=status" | ConvertTo-Json  # Harusnya ON
+```
+
 ### Diagnostic Tools
 
 ```bash
@@ -918,23 +1004,134 @@ Get-Content logs/backend.log -Tail 50 -Wait  # Windows
 - OrcaSlicer (CLI slicing)
 - Bambu Lab A1 Combo AMS printer
 
-### Quick Start
+### Quick Start (Lokal / Development)
 
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your Bambu Lab credentials and printer IP/serial
-
-# 3. Run (auto-starts backend + frontend)
+# 2. Run (auto-starts backend + frontend)
 start.bat           # Windows
 ./start.sh          # Linux/macOS
 ```
 
-**Access:** http://localhost:3051
+**Access lokal:** http://localhost:3051
+
+---
+
+## 🏗️ Deployment System (Server Production)
+
+Sistem ini di-deploy ke server homelab melalui pipeline otomatis:
+
+```
+[Laptop] git push origin development
+         ↓
+[GitHub Actions] Build Docker image (~3-5 menit)
+         ↓  Build frontend npm + Docker image backend & frontend
+         ↓  Push ke GHCR:
+         ↓    ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-backend:development
+         ↓    ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-frontend:development
+         ↓
+[deploy.bat / deploy.ps1] Portainer API → Stack update → Pull image baru → Restart container
+         ↓
+[Server 192.168.4.67] Container berjalan dengan kode terbaru
+```
+
+### Cara Deploy Sehari-hari
+
+```powershell
+# 1. Commit & push perubahan
+git add .
+git commit -m "fix: deskripsi perubahan"
+git push origin development
+
+# 2. Tunggu GitHub Actions selesai (~3-5 menit)
+# Cek: https://github.com/kevinwiliamleo-dev/3d-print-farm-management/actions
+
+# 3. Deploy ke server
+.\deploy.bat
+# atau
+.\deploy.ps1
+```
+
+### Cara Kerja deploy.bat / deploy.ps1
+
+Script `deploy.ps1` melakukan:
+1. `git add -A && git commit && git push` (jika ada perubahan)
+2. Login ke Portainer API `https://192.168.4.67:9443` dengan kredensial tersimpan di `.deploy-config.json`
+3. Kirim PUT request ke `POST /api/stacks/44?endpointId=X` dengan `pullImage=true`
+4. Portainer pull image terbaru dari GHCR → restart container
+5. Verifikasi status container
+
+**Flags yang tersedia:**
+```powershell
+.\deploy.ps1              # Deploy + push kode terbaru
+.\deploy.ps1 -Status      # Lihat status container
+.\deploy.ps1 -Logs        # Buka logs backend di browser Portainer
+.\deploy.ps1 -Restart     # Restart semua container (tanpa push)
+.\deploy.ps1 -Setup       # Panduan setup awal Portainer
+.\deploy.ps1 -SetupGHCR   # Daftarkan GHCR registry ke Portainer (sekali saja)
+```
+
+### Konfigurasi Tersimpan (`deploy-config.json`)
+
+File `.deploy-config.json` (gitignored) menyimpan:
+- `portainer_password` — password Portainer (untuk auto-login)
+- `token` — JWT Portainer (expire, di-refresh otomatis)
+- `github_pat` — GitHub PAT (untuk GHCR registry)
+
+**Login pertama kali:** Jalankan `.\deploy.ps1`, masukkan username+password Portainer saat diminta → tersimpan otomatis untuk sesi berikutnya.
+
+### Docker Images (GHCR)
+
+| Image | Tag | Source |
+|-------|-----|--------|
+| `ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-backend` | `development` | Branch `development` |
+| `ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-frontend` | `development` | Branch `development` |
+| `ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-backend` | `main` | Branch `main` |
+| `ghcr.io/kevinwiliamleo-dev/3d-print-farm-management-frontend` | `main` | Branch `main` |
+
+### GitHub Actions (`.github/workflows/docker-build.yml`)
+
+Trigger: push ke `development` atau `main`
+
+Steps:
+1. Checkout repo
+2. Setup Node.js 18, `npm ci`, `npm run build` (frontend di-build di runner, bukan di Docker)
+3. Login ke GHCR
+4. Build & push Docker image backend (`Dockerfile.backend`)
+5. Build & push Docker image frontend (`Dockerfile.frontend`) — memakai build output dari step 2
+
+### docker-compose.yml (dipakai oleh Portainer)
+
+Stack `3d-print-farm` (ID: 44) memakai `docker-compose.yml` di root repo:
+- **backend**: Pull image dari GHCR, mount `./data` + `./logs`
+- **frontend**: Pull image dari GHCR, expose port `3051`
+- **Tidak ada Watchtower** — deploy manual via `deploy.bat`
+
+### Quick Deploy Manual (tanpa deploy.bat)
+
+Jika perlu deploy cepat tanpa script:
+```powershell
+# Bypass self-signed cert Portainer
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+
+$cfg = Get-Content ".\.deploy-config.json" | ConvertFrom-Json
+$r = Invoke-RestMethod "https://192.168.4.67:9443/api/auth" -Method POST `
+     -Body (@{username="root";password=$cfg.portainer_password}|ConvertTo-Json) `
+     -ContentType "application/json"
+$token = $r.jwt
+$stack = Invoke-RestMethod "https://192.168.4.67:9443/api/stacks/44" `
+         -Headers @{Authorization="Bearer $token"}
+$cc = (Get-Content ".\docker-compose.yml" -Raw) -replace "`r`n","`n"
+$body = (@{StackFileContent=$cc;Env=@();Prune=$true;pullImage=$true}|ConvertTo-Json -Depth 5) -replace "`r`n","`n"
+Invoke-RestMethod "https://192.168.4.67:9443/api/stacks/44?endpointId=$($stack.EndpointId)" `
+  -Method PUT -Headers @{Authorization="Bearer $token";"Content-Type"="application/json"} -Body $body
+```
+
+---
 
 ---
 
@@ -1081,6 +1278,43 @@ http://localhost:8000
 | PUT | `/api/filaments/slots/{printer_id}/{slot}/remaining` | Update remaining grams for slot |
 | POST | `/api/printers/{printer_id}/ams/load/{slot}` | Load filament from slot |
 | POST | `/api/printers/{printer_id}/ams/unload` | Unload current filament |
+
+#### Auto Bed Cooling ✨ NEW (`src/api/bed_cooling.py`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/printers/{printer_id}/bed-cooling/configure` | Configure ESP32 Kit IP + enable/disable |
+| GET | `/api/printers/{printer_id}/bed-cooling/status` | Get current cooling status |
+| POST | `/api/printers/{printer_id}/bed-cooling/force-stop` | Force stop fan (manual override) |
+
+**Configure Request:**
+```json
+{
+  "kit_ip": "192.168.4.197",
+  "enabled": true,
+  "ambient_threshold": 33.0
+}
+```
+
+**Status Response:**
+```json
+{
+  "printer_id": "BAMBU_192_168_4_101",
+  "is_cooling": true,
+  "elapsed_seconds": 120,
+  "start_temp": 55.0,
+  "target_temp": 25.0,
+  "kit_ip": "192.168.4.197",
+  "kit_enabled": true
+}
+```
+
+**Cooling Logic (Hysteresis):**
+```
+bed_temp > target + 3.0°C  → START fan
+bed_temp ≤ target + 2.0°C  → STOP fan (setelah min 60s)
+target = 0 & bed > 33°C    → Ambient mode: START fan
+MQTT tick (~30s)            → Re-send fan=ON (keep-alive)
+```
 
 ### API Response Format
 ```json
@@ -1420,10 +1654,12 @@ For detailed information, see:
 
 This is a personal project for 3D print farm automation. For questions or suggestions, please open an issue on GitHub.
 
-**Project Status:** ✅ Production Ready (with Feb 3, 2026 bug fixes)  
-**Last Updated:** February 3, 2026
+**Project Status:** ✅ Production Ready  
+**Last Updated:** February 26, 2026
 
 **Recent Fixes:**
+- ✅ Bed cooling fan keep-alive (Feb 26, 2026) — `asyncio.create_task` diganti `await` langsung
+- ✅ Frontend fan toggle pakai actual ESP32 state (Feb 26, 2026)
 - ✅ Print completion timing validation (30s minimum)
 - ✅ Calibration logic corrected (checkboxes work as expected)
 
