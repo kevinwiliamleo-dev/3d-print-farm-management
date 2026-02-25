@@ -61,10 +61,6 @@ class BedCoolingService:
         self.kit_ip: Optional[str] = None
         self.kit_enabled: bool = False
         
-        # Keep-alive task: sends fan=ON every 10s while cooling, independent of MQTT
-        self._keepalive_task: Optional[asyncio.Task] = None
-        self.keepalive_interval = 10  # seconds between keep-alive sends
-        
         logger.info(f"🌡️ Bed Cooling Service initialized for printer: {printer_id}")
     
     def configure_kit(self, kit_ip: str, enabled: bool = True, ambient_threshold: float = None):
@@ -206,16 +202,19 @@ class BedCoolingService:
                         f"⏳ Waiting before restart: {int(time_since_last_action)}/{self.min_fan_action_interval}s"
                     )
             else:
-                # Already cooling, log progress AND verify fan state every 30 seconds
+                # Already cooling — re-send fan=ON on every MQTT message as keep-alive
+                # This works reliably because update_temperature() is called in an already-running
+                # asyncio loop (bambu_service.py via loop.run_until_complete), so await works here.
+                # No asyncio.create_task needed — that would die when the ephemeral loop closes.
                 elapsed = current_time - self.cooling_state.start_time
                 temp_drop = self.cooling_state.start_temp - bed_temp
+                await self._control_fan("on")  # keep-alive: re-confirm fan ON every MQTT tick
                 if current_time - self.cooling_state.last_temp_check >= 30:
                     logger.info(
                         f"❄️ Cooling in progress: {bed_temp:.1f}°C → {bed_target_temp:.1f}°C "
                         f"(elapsed: {int(elapsed)}s, dropped: {temp_drop:.1f}°C)"
                     )
                     self.cooling_state.last_temp_check = current_time
-                    # Keep-alive is handled by _keepalive_loop() background task (every 10s)
         
         # =================================================================
         # SCENARIO 2: Target reached → STOP fan
@@ -242,24 +241,6 @@ class BedCoolingService:
         # Fan already OFF → don't start yet (hysteresis gap)
         # =================================================================
     
-    async def _keepalive_loop(self):
-        """Background task: send fan=ON every keepalive_interval seconds while cooling.
-        Prevents ESP32 watchdog auto-off and handles brief reboots/network blips.
-        """
-        try:
-            while self.cooling_state.is_cooling:
-                await asyncio.sleep(self.keepalive_interval)
-                if not self.cooling_state.is_cooling:
-                    break  # Stopped while sleeping
-                logger.debug(f"🔄 Fan keep-alive ping ({self.keepalive_interval}s interval)")
-                success = await self._control_fan("on")
-                if not success:
-                    logger.warning("⚠️ Keep-alive fan=ON failed (will retry next interval)")
-        except asyncio.CancelledError:
-            logger.debug("🛑 Fan keep-alive task cancelled")
-        except Exception as e:
-            logger.error(f"❌ Keep-alive loop error: {e}")
-
     async def _start_cooling(self, bed_temp: float, bed_target_temp: float):
         """Start cooling cycle - turn ON fan"""
         self.cooling_state.is_cooling = True
@@ -277,12 +258,9 @@ class BedCoolingService:
             logger.info("✅ Cooling fan turned ON")
         else:
             logger.error("❌ Failed to turn ON cooling fan")
-        
-        # Start background keep-alive task
-        if self._keepalive_task and not self._keepalive_task.done():
-            self._keepalive_task.cancel()
-        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-        logger.debug(f"✅ Fan keep-alive task started (interval: {self.keepalive_interval}s)")
+        # NOTE: No asyncio.create_task() keepalive here — tasks die when the ephemeral
+        # event loop in bambu_service.py closes. Instead, fan=ON is re-sent on every
+        # subsequent MQTT message via the 'already cooling' branch of update_temperature().
     
     async def _stop_cooling(self):
         """Stop cooling cycle - turn OFF fan"""
@@ -291,11 +269,6 @@ class BedCoolingService:
         
         logger.info("🛑 Stopping bed cooling")
         self._last_fan_action_time = time.time()
-        
-        # Cancel keep-alive task first
-        if self._keepalive_task and not self._keepalive_task.done():
-            self._keepalive_task.cancel()
-            self._keepalive_task = None
         
         # Turn OFF Kit fan
         success = await self._control_fan("off")
