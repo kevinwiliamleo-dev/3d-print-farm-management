@@ -63,7 +63,7 @@ class BedCoolingService:
         
         logger.info(f"🌡️ Bed Cooling Service initialized for printer: {printer_id}")
     
-    def configure_kit(self, kit_ip: str, enabled: bool = True, ambient_threshold: float = 40.0):
+    def configure_kit(self, kit_ip: str, enabled: bool = True, ambient_threshold: float = None):
         """
         Configure external Kit for cooling
         
@@ -71,12 +71,14 @@ class BedCoolingService:
             kit_ip: IP address of ESP32 Kit (e.g. "192.168.1.100")
             enabled: Enable/disable auto cooling feature
             ambient_threshold: Activate fan when bed heater is OFF but bed > this temp (°C).
-                               Default 40°C — fan kicks in if bed still hot after print ends.
+                               If not provided, keeps the current value (default 33°C from __init__).
         """
         self.kit_ip = kit_ip
         self.kit_enabled = enabled
-        self.ambient_threshold = ambient_threshold
-        logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}, AmbientThreshold={ambient_threshold}°C")
+        if ambient_threshold is not None:
+            self.ambient_threshold = ambient_threshold
+        # else: keep __init__ default (33.0°C) — do NOT override with function default
+        logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}, AmbientThreshold={self.ambient_threshold}°C")
     
     async def _control_fan(self, state: str) -> bool:
         """
@@ -139,14 +141,17 @@ class BedCoolingService:
             if bed_temp >= self.ambient_threshold:
                 # Bed heater OFF but bed still hot → cool to ambient threshold
                 if not self.cooling_state.is_cooling:
-                    logger.info(
-                        f"🌡️ Bed heater OFF but bed hot ({bed_temp:.1f}°C > {self.ambient_threshold:.1f}°C) — "
-                        f"activating fan for ambient cooling"
-                    )
-                    await self._start_cooling(bed_temp, self.ambient_threshold)
-                # else: already cooling — let normal SCENARIO 2 logic handle stop
-                # Fall through so scenario 2 (stop when cool enough) still runs
-                # Update bed_target_temp to ambient_threshold for comparison below
+                    time_since_last = time.time() - self._last_fan_action_time
+                    if time_since_last >= self.min_fan_action_interval:
+                        logger.info(
+                            f"🌡️ Bed heater OFF but bed hot ({bed_temp:.1f}°C >= {self.ambient_threshold:.1f}°C) — "
+                            f"activating fan for ambient cooling"
+                        )
+                        await self._start_cooling(bed_temp, self.ambient_threshold)
+                    else:
+                        logger.debug(f"⏳ Ambient cooling: waiting {int(self.min_fan_action_interval - time_since_last)}s before restart")
+                    return  # BUG FIX: don't fall through to scenario checks after just starting/waiting
+                # Already cooling in ambient mode — set target for scenario 2 stop check
                 bed_target_temp = self.ambient_threshold
             else:
                 # Bed already cool, stop if still running
@@ -190,17 +195,21 @@ class BedCoolingService:
         # =================================================================
         # SCENARIO 2: Target reached → STOP fan
         # Only stop when bed is truly within stop_tolerance of target
-        # This is the ONLY condition to stop — no time-based early stop
+        # AND fan has been running at least min_fan_action_interval seconds
         # =================================================================
         elif self.cooling_state.is_cooling and temp_diff <= self.stop_tolerance:
             elapsed = current_time - self.cooling_state.start_time
             total_drop = self.cooling_state.start_temp - bed_temp
-            logger.info(
-                f"✅ Bed cooling complete! {self.cooling_state.start_temp:.1f}°C → {bed_temp:.1f}°C "
-                f"(diff: {temp_diff:.1f}°C ≤ stop_tolerance {self.stop_tolerance}°C, "
-                f"time: {int(elapsed)}s, dropped: {total_drop:.1f}°C)"
-            )
-            await self._stop_cooling()
+            # Ensure fan ran for at least min_fan_action_interval before stopping
+            if elapsed >= self.min_fan_action_interval:
+                logger.info(
+                    f"✅ Bed cooling complete! {self.cooling_state.start_temp:.1f}°C → {bed_temp:.1f}°C "
+                    f"(diff: {temp_diff:.1f}°C ≤ stop_tolerance {self.stop_tolerance}°C, "
+                    f"time: {int(elapsed)}s, dropped: {total_drop:.1f}°C)"
+                )
+                await self._stop_cooling()
+            else:
+                logger.debug(f"⏳ Target reached but fan min runtime not met ({int(elapsed)}/{self.min_fan_action_interval}s)")
         
         # =================================================================
         # In-between zone (stop_tolerance < diff <= start_threshold):
