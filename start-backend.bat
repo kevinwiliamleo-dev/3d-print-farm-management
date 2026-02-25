@@ -1,41 +1,33 @@
 @echo off
 REM ============================================
-REM Backend Server Startup Script
-REM Python FastAPI Server (Port 5051)
+REM Backend Server Auto-Restart Batch File
+REM Automatically restarts server if it crashes
 REM ============================================
 
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
+:start_backend
 echo.
-echo ============================================
-echo    Starting Backend Server (Port 5051)
-echo ============================================
+echo ========================================
+echo Starting Backend Server at %date% %time%
+echo ========================================
 echo.
-
-REM Check if virtual environment exists
-if not exist "venv_clean\Scripts\activate.bat" (
-    echo [!] Virtual environment not found!
-    echo [!] Please run: python -m venv venv_clean
-    echo [!] Then: venv_clean\Scripts\activate ^&^& pip install -r requirements.txt
-    pause
-    exit /b 1
-)
 
 REM Activate virtual environment
 call venv_clean\Scripts\activate.bat
 
-REM Check if dependencies are installed
-python -c "import fastapi" 2>NUL
-if !ERRORLEVEL! NEQ 0 (
-    echo [!] Dependencies not installed!
-    echo [*] Installing dependencies...
-    pip install -r requirements.txt
-)
+REM Start uvicorn server
+uvicorn src.main:app --host 0.0.0.0 --port 5000 --reload
 
-echo [*] Starting FastAPI server...
+REM If we get here, server crashed - restart it
 echo.
+echo [ERROR] Backend server crashed at %date% %time%
+echo [INFO] Restarting in 5 seconds...
+echo.
+timeout /t 5 /nobreak
 
-REM Start the backend server
-python -m uvicorn src.main:app --host 0.0.0.0 --port 5051 --reload
+goto start_backend
 
+:end
 pause

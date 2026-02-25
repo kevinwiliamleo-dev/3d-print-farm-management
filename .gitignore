@@ -77,3 +77,6 @@ yarn-error.log
 *.tmp
 *.temp
 .tmp/
+
+# Deploy script config (berisi Portainer token - jangan di-push!)
+.deploy-config.json

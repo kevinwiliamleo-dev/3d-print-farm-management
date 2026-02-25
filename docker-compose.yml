@@ -48,16 +48,8 @@ services:
     depends_on:
       - backend
 
-  # Watchtower - Auto update dari Git (optional)
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: 3d-farm-watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 300 --cleanup  # Check every 5 minutes
-    networks:
-      - printfarm-network
+  # NOTE: Watchtower dihapus - deploy dilakukan manual via deploy.bat (Portainer API)
+  # Lihat deploy.bat / deploy.ps1 untuk cara deploy kode terbaru ke server
 
 networks:
   printfarm-network:
@@ -67,6 +59,4 @@ networks:
     # name: portainer_network
 
 volumes:
-  data:
-  logs:
   node_modules:

@@ -1,0 +1,82 @@
+version: '3.8'
+
+# ====================================================
+# DEVELOPMENT MODE - Hot Reload + Portainer Git Deploy
+#
+# CARA PAKAI DI PORTAINER:
+#   1. Buka stack '3d-print-farm' di Portainer
+#   2. Pilih 'Git Repository'
+#   3. Compose path: docker-compose.dev.yml
+#   4. Branch: development
+#   5. Klik 'Pull and redeploy'
+#
+# CARA DEPLOY DARI VS CODE:
+#   Jalankan: deploy.bat
+#   (akan otomatis push ke Git + trigger redeploy Portainer)
+#
+# SOURCE CODE:
+#   Backend  : di-mount dari APP_DIR/src  (auto-reload)
+#   Frontend : di-mount dari APP_DIR/frontend/src (hot-reload)
+#   Set APP_DIR di Portainer env atau biarkan default /opt/3d-print-farm
+# ====================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: 3d-farm-backend-dev
+    restart: unless-stopped
+    ports:
+      - "5051:5051"
+    volumes:
+      # Mount source code langsung - perubahan langsung terdeteksi
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./requirements.txt:/app/requirements.txt
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BAMBU_PRINTER_IP=${BAMBU_PRINTER_IP:-}
+      - BAMBU_PRINTER_ID=${BAMBU_PRINTER_ID:-}
+      - BAMBU_ACCESS_CODE=${BAMBU_ACCESS_CODE:-}
+    # Override CMD untuk pakai --reload
+    command: uvicorn src.main:app --host 0.0.0.0 --port 5051 --reload
+    networks:
+      - printfarm-dev-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5051/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    container_name: 3d-farm-frontend-dev
+    restart: unless-stopped
+    ports:
+      - "3051:3051"
+    volumes:
+      # Mount source code frontend - hot reload aktif
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - node_modules:/app/node_modules
+    environment:
+      - PORT=3051
+      - REACT_APP_BACKEND_URL=
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    depends_on:
+      - backend
+    networks:
+      - printfarm-dev-network
+
+networks:
+  printfarm-dev-network:
+    driver: bridge
+
+volumes:
+  node_modules:

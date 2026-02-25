@@ -43,13 +43,6 @@ echo.
 echo Initializing database...
 python -c "from src.database import init_db; init_db()" >nul 2>&1
 
-REM Build frontend
-echo.
-echo Building frontend...
-cd frontend
-call npm run build
-cd ..
-
 echo.
 echo ========================================
 echo Starting All Servers with Auto-Restart
