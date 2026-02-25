@@ -186,9 +186,8 @@ class BedCoolingService:
                         f"⏳ Waiting before restart: {int(time_since_last_action)}/{self.min_fan_action_interval}s"
                     )
             else:
-                # Already cooling — ESP32 maintains fan state until told otherwise.
-                # No need to re-send fan=ON every tick (that causes unnecessary HTTP spam).
-                # Fan was turned ON in _start_cooling() and will be turned OFF in _stop_cooling().
+                # Already cooling — check every 30s, verify fan is still ON.
+                # If fan hardware was reset (e.g. Orange Pi restart), self-heal by re-sending ON.
                 elapsed = current_time - self.cooling_state.start_time
                 temp_drop = self.cooling_state.start_temp - bed_temp
                 if current_time - self.cooling_state.last_temp_check >= 30:
@@ -197,6 +196,11 @@ class BedCoolingService:
                         f"(elapsed: {int(elapsed)}s, dropped: {temp_drop:.1f}°C)"
                     )
                     self.cooling_state.last_temp_check = current_time
+                    # Verify fan is actually ON — re-send if hardware was reset
+                    fan_is_on = await self._verify_fan_state()
+                    if not fan_is_on:
+                        logger.warning("⚠️ Fan reported OFF during active cooling — re-sending fan=ON (hardware may have reset)")
+                        await self._control_fan("on")
         
         # =================================================================
         # SCENARIO 2: Target reached → STOP fan
@@ -240,9 +244,8 @@ class BedCoolingService:
             logger.info("✅ Cooling fan turned ON")
         else:
             logger.error("❌ Failed to turn ON cooling fan")
-        # NOTE: No asyncio.create_task() keepalive here — tasks die when the ephemeral
-        # event loop in bambu_service.py closes. Instead, fan=ON is re-sent on every
-        # subsequent MQTT message via the 'already cooling' branch of update_temperature().
+        # NOTE: No keep-alive loop here. Every 30s while cooling, the 'already cooling' branch
+        # verifies fan state via /kit/fan?state=status and re-sends ON if hardware was reset.
     
     async def _stop_cooling(self):
         """Stop cooling cycle - turn OFF fan"""
