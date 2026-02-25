@@ -30,8 +30,9 @@ def read_gpio_state():
         return False
 
 def setup_gpio():
+    # Only set pin direction (mode), do NOT reset value on startup.
+    # This preserves fan state if service is restarted mid-operation.
     run_command(f"gpio mode {FAN_WPI_PIN} out")
-    run_command(f"gpio write {FAN_WPI_PIN} 0")
 
 def run_ustreamer():
     subprocess.Popen(USTREAMER_CMD, shell=True)
