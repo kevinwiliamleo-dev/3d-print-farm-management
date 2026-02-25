@@ -147,21 +147,51 @@ export const Dashboard: React.FC = () => {
   // For backwards compatibility
   const checkKitConnection = (kitId: string, ip: string) => checkKitStatus(kitId, ip);
   
-  // Toggle fan
+  // Toggle fan - query actual ESP32 state first to avoid stale UI state
   const toggleFan = async (kitId: string, ip: string, currentState: string) => {
-    const newState = currentState === 'ON' ? 'off' : 'on';
     try {
+      // Always query actual ESP32 state first (UI state may be stale because polling is disabled)
+      let actualState: 'ON' | 'OFF' | 'unknown' = 'unknown';
+      try {
+        const statusRes = await fetch(`http://${ip}:5000/kit/fan?state=status`, { signal: AbortSignal.timeout(3000) });
+        const statusData = await statusRes.json();
+        actualState = statusData.status === 'ON' ? 'ON' : 'OFF';
+      } catch {
+        // If status check fails, fall back to UI state
+        actualState = (currentState === 'ON' || currentState === 'OFF') ? currentState as 'ON' | 'OFF' : 'OFF';
+      }
+      const newState = actualState === 'ON' ? 'off' : 'on';
       await fetch(`http://${ip}:5000/kit/fan?state=${newState}`);
-      setKits(prev => prev.map(k => 
-        k.id === kitId ? { ...k, fanState: newState.toUpperCase() as 'ON' | 'OFF' } : k
-      ));
-      // Save to localStorage
+      const newFanState = newState.toUpperCase() as 'ON' | 'OFF';
       setKits(prev => {
-        localStorage.setItem('kits', JSON.stringify(prev));
-        return prev;
+        const updated = prev.map(k =>
+          k.id === kitId ? { ...k, fanState: newFanState, fanConnected: true } : k
+        );
+        localStorage.setItem('kits', JSON.stringify(updated));
+        return updated;
       });
     } catch (err) {
       console.error('Failed to toggle fan:', err);
+    }
+  };
+
+  // Refresh fan status for all kits (used when Settings tab opens)
+  const refreshFanStatus = async () => {
+    for (const kit of kits) {
+      try {
+        const res = await fetch(`http://${kit.ip}:5000/kit/fan?state=status`, { signal: AbortSignal.timeout(3000) });
+        const data = await res.json();
+        const fanState: 'ON' | 'OFF' = data.status === 'ON' ? 'ON' : 'OFF';
+        setKits(prev => {
+          const updated = prev.map(k =>
+            k.id === kit.id ? { ...k, fanState, fanConnected: true } : k
+          );
+          localStorage.setItem('kits', JSON.stringify(updated));
+          return updated;
+        });
+      } catch {
+        // ignore, keep existing state
+      }
     }
   };
 
@@ -185,6 +215,14 @@ export const Dashboard: React.FC = () => {
     
     return () => clearInterval(interval);
   }, [kits.length]);
+
+  // Auto-refresh fan status when Settings tab opens (fix stale UI state)
+  useEffect(() => {
+    if (activeTab === 'settings' && kits.length > 0) {
+      refreshFanStatus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const refreshQueue = useCallback(() => {
     setQueueRefreshKey(k => k + 1);
