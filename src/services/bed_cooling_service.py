@@ -50,11 +50,11 @@ class BedCoolingService:
         # Cooling parameters
         # HYSTERESIS DESIGN: start_threshold must be > stop_tolerance
         # This prevents rapid on/off cycling when bed temp fluctuates
-        self.start_threshold = 5.0     # START fan when bed > target + 5°C
+        self.start_threshold = 3.0     # START fan when bed > target + 3°C
         self.stop_tolerance = 2.0      # STOP fan when bed <= target + 2°C
         self.min_fan_action_interval = 60  # Min 60s between fan state changes (prevent rapid cycling)
         self.check_interval = 5        # Check every 5 seconds
-        self.ambient_threshold = 40.0  # Activate fan when target=0 but bed > this (°C)
+        self.ambient_threshold = 33.0  # Activate fan when target=0 but bed > this (°C)
         self._last_fan_action_time: float = 0  # Track last time fan was toggled
         
         # Kit configuration (will be set from settings)
@@ -136,7 +136,7 @@ class BedCoolingService:
         # Skip if no valid target (target = 0 means bed heater OFF after print)
         # Special case: still activate fan if bed is hot (ambient cooling mode)
         if bed_target_temp <= 0:
-            if bed_temp > self.ambient_threshold:
+            if bed_temp >= self.ambient_threshold:
                 # Bed heater OFF but bed still hot → cool to ambient threshold
                 if not self.cooling_state.is_cooling:
                     logger.info(
@@ -164,7 +164,7 @@ class BedCoolingService:
         # Only start if diff > start_threshold AND fan not already on
         # AND minimum interval since last action (prevent rapid cycling)
         # =================================================================
-        if temp_diff > self.start_threshold:
+        if temp_diff >= self.start_threshold:
             if not self.cooling_state.is_cooling:
                 if time_since_last_action >= self.min_fan_action_interval:
                     logger.info(
