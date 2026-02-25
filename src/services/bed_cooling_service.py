@@ -211,13 +211,10 @@ class BedCoolingService:
                         f"(elapsed: {int(elapsed)}s, dropped: {temp_drop:.1f}°C)"
                     )
                     self.cooling_state.last_temp_check = current_time
-                    # HEARTBEAT: Verify ESP32 fan is actually ON (catches reboots, manual toggles, etc)
-                    fan_actually_on = await self._verify_fan_state()
-                    if not fan_actually_on:
-                        logger.warning(
-                            f"⚠️ Fan sync mismatch! Backend=cooling but ESP32=OFF — re-sending ON command"
-                        )
-                        await self._control_fan("on")
+                    # KEEP-ALIVE: Re-send fan=ON every 30s to prevent ESP32 watchdog auto-off
+                    # Also handles: reboots, manual toggle OFF, network blips
+                    logger.debug("🔄 Fan keep-alive: re-sending ON command to ESP32")
+                    await self._control_fan("on")
         
         # =================================================================
         # SCENARIO 2: Target reached → STOP fan
