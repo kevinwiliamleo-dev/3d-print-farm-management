@@ -80,6 +80,26 @@ class BedCoolingService:
         # else: keep __init__ default (33.0°C) — do NOT override with function default
         logger.info(f"🔧 Kit configured: IP={kit_ip}, Enabled={enabled}, AmbientThreshold={self.ambient_threshold}°C")
     
+    async def _verify_fan_state(self) -> bool:
+        """
+        Query ESP32 to get actual fan state.
+        Returns True if fan is ON, False if OFF or unreachable.
+        On error, returns True to avoid spurious re-sends.
+        """
+        if not self.kit_ip:
+            return True  # Can't verify, assume OK
+        try:
+            url = f"http://{self.kit_ip}:5000/kit/fan?state=status"
+            timeout = aiohttp.ClientTimeout(total=5.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get("status") == "ON"
+        except Exception as e:
+            logger.debug(f"⚠️ Could not verify fan state: {e} — assuming ON to avoid spam")
+        return True  # Can't determine → optimistic (don't re-send on every network blip)
+
     async def _control_fan(self, state: str) -> bool:
         """
         Control Kit fan via HTTP
@@ -182,7 +202,7 @@ class BedCoolingService:
                         f"⏳ Waiting before restart: {int(time_since_last_action)}/{self.min_fan_action_interval}s"
                     )
             else:
-                # Already cooling, log progress every 30 seconds
+                # Already cooling, log progress AND verify fan state every 30 seconds
                 elapsed = current_time - self.cooling_state.start_time
                 temp_drop = self.cooling_state.start_temp - bed_temp
                 if current_time - self.cooling_state.last_temp_check >= 30:
@@ -191,6 +211,13 @@ class BedCoolingService:
                         f"(elapsed: {int(elapsed)}s, dropped: {temp_drop:.1f}°C)"
                     )
                     self.cooling_state.last_temp_check = current_time
+                    # HEARTBEAT: Verify ESP32 fan is actually ON (catches reboots, manual toggles, etc)
+                    fan_actually_on = await self._verify_fan_state()
+                    if not fan_actually_on:
+                        logger.warning(
+                            f"⚠️ Fan sync mismatch! Backend=cooling but ESP32=OFF — re-sending ON command"
+                        )
+                        await self._control_fan("on")
         
         # =================================================================
         # SCENARIO 2: Target reached → STOP fan
