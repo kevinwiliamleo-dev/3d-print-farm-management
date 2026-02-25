@@ -199,14 +199,15 @@ class BambuLabMQTTClient:
     
     # Default reconnection settings
     DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
-    DEFAULT_RECONNECT_DELAY = 5.0
-    DEFAULT_RECONNECT_DELAY_MAX = 60.0
+    DEFAULT_RECONNECT_DELAY = 10.0   # 10s initial delay - gives printer time to release ghost connections
+    DEFAULT_RECONNECT_DELAY_MAX = 120.0
 
     def __init__(
         self,
         printer_id: str,
         printer_ip: str = None,
         access_code: str = None,
+        serial_number: str = None,
         mqtt_broker: str = "mqtt.bambulab.com",
         mqtt_port: int = 8883,
         bambu_username: str = None,
@@ -237,6 +238,14 @@ class BambuLabMQTTClient:
         self.printer_ip = printer_ip
         self.access_code = access_code
         self.use_lan_mode = use_lan_mode and printer_ip
+        # mqtt_serial is used for MQTT topic names - must be the ACTUAL Bambu serial number
+        # e.g. '03900D5A2402051', NOT the database printer_id like 'BAMBU_192_168_4_101'
+        self.mqtt_serial = serial_number or printer_id
+        if serial_number and serial_number != printer_id:
+            logger.info(f"🔑 Using serial_number for MQTT topics: {serial_number} (printer_id={printer_id})")
+        elif not serial_number:
+            logger.warning(f"⚠️  No serial_number provided, using printer_id '{printer_id}' for MQTT topics. "
+                           f"This may cause MQTT issues if printer_id is not the actual Bambu serial!")
         
         # Reconnection settings
         self.auto_reconnect = auto_reconnect
@@ -271,11 +280,12 @@ class BambuLabMQTTClient:
         try:
             self.client = mqtt.Client(
                 client_id=client_id,
-                callback_api_version=mqtt.CallbackAPIVersion.VERSION2
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+                reconnect_on_failure=False,  # Disable paho auto-reconnect, use our custom logic
             )
         except TypeError:
             # Fallback for older paho-mqtt
-            self.client = mqtt.Client(client_id=client_id)
+            self.client = mqtt.Client(client_id=client_id, clean_session=True)
         
         # Set credentials based on mode
         if self.use_lan_mode:
@@ -567,8 +577,8 @@ class BambuLabMQTTClient:
             # Sync to database
             _sync_mqtt_status_to_db(self.printer_id, True)
             
-            # Subscribe to printer status topic
-            status_topic = self.TOPIC_STATUS.format(printer_id=self.printer_id)
+            # Subscribe to printer status topic (MUST use actual Bambu serial)
+            status_topic = self.TOPIC_STATUS.format(printer_id=self.mqtt_serial)
             self.client.subscribe(status_topic, qos=0)
             logger.info(f"Subscribed to topic: {status_topic}")
             
@@ -586,7 +596,7 @@ class BambuLabMQTTClient:
     def _request_status_push(self):
         """Request printer to send status update"""
         try:
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             push_request = {
                 "pushing": {
                     "sequence_id": self._generate_sequence_id(),
@@ -667,10 +677,18 @@ class BambuLabMQTTClient:
 
     def _on_disconnect(self, client, userdata, *args):
         """Callback when MQTT client disconnects"""
+        # Log reason code for diagnosis (paho v2: args=(disconnect_flags, reason_code, properties))
+        reason_str = ""
+        if args:
+            try:
+                rc = args[1] if len(args) > 1 else args[0]
+                reason_str = f" (reason={rc})"
+            except Exception:
+                pass
         self.mqtt_connected = False
         self._update_socket_state(SocketState.CLOSED)
         self._update_api_state(ApiState.NO_RESPONSE)
-        logger.warning(f"MQTT disconnected")
+        logger.warning(f"MQTT disconnected{reason_str}")
         
         # Sync to database
         _sync_mqtt_status_to_db(self.printer_id, False)
@@ -1355,7 +1373,7 @@ class BambuLabMQTTClient:
                     "param": gcode + "\n"
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1398,7 +1416,7 @@ class BambuLabMQTTClient:
                     "tar_temp": 220
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1442,7 +1460,7 @@ class BambuLabMQTTClient:
                     "tar_temp": 220
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1555,7 +1573,7 @@ class BambuLabMQTTClient:
                     "setting_id": ""  # Empty for custom settings
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1595,7 +1613,7 @@ class BambuLabMQTTClient:
             }
             
             # Send via MQTT
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             result = self.client.publish(
                 command_topic,
                 json.dumps(command),
@@ -1622,7 +1640,7 @@ class BambuLabMQTTClient:
                     "sequence_id": self._generate_sequence_id()
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1647,7 +1665,7 @@ class BambuLabMQTTClient:
                     "sequence_id": self._generate_sequence_id()
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1675,7 +1693,7 @@ class BambuLabMQTTClient:
                     "sequence_id": self._generate_sequence_id()
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1708,7 +1726,7 @@ class BambuLabMQTTClient:
                     "sequence_id": self._generate_sequence_id()
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -1930,7 +1948,7 @@ G1 X0 Y250 F12000 ; move to back corner
                 }
             }
             
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             logger.info(f"📤 Sending project_file command: {json.dumps(project_command, indent=2)}")
             logger.info(f"🔍 CALIBRATION PARAMS: flow_cali={flow_cali}, vibration_cali={vibration_cali}, bed_leveling={bed_leveling}")
@@ -1975,7 +1993,7 @@ G1 X0 Y250 F12000 ; move to back corner
                     "param": "G28 X Y\nG1 Y 230 F6000\nM400"  # Home XY, move bed forward
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -2007,7 +2025,7 @@ G1 X0 Y250 F12000 ; move to back corner
                     "param": gcode
                 }
             }
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             
             result = self.client.publish(command_topic, json.dumps(command), qos=1)
             
@@ -2134,7 +2152,7 @@ G1 X0 Y250 F12000 ; move to back corner
                 }
             }
             
-            command_topic = self.TOPIC_COMMAND.format(printer_id=self.printer_id)
+            command_topic = self.TOPIC_COMMAND.format(printer_id=self.mqtt_serial)
             result = self.client.publish(command_topic, json.dumps(project_command), qos=1)
             
             if result.rc != mqtt.MQTT_ERR_SUCCESS:
@@ -2252,6 +2270,7 @@ def initialize_bambu_client(
     printer_id: str,
     printer_ip: str,
     access_code: str,
+    serial_number: str = None,
     use_lan_mode: bool = True
 ) -> BambuLabMQTTClient:
     """
@@ -2259,9 +2278,11 @@ def initialize_bambu_client(
     Should be called once at application startup.
     
     Args:
-        printer_id: Printer serial number
+        printer_id: Database printer ID
         printer_ip: Printer IP address
         access_code: Printer access code
+        serial_number: Actual Bambu serial number for MQTT topics (e.g. '03900D5A2402051')
+                       If None, falls back to printer_id (may cause MQTT issues)
         use_lan_mode: Whether to use LAN mode (default True for A1)
     
     Returns:
@@ -2274,12 +2295,13 @@ def initialize_bambu_client(
             logger.warning("Bambu client already initialized, returning existing instance")
             return _global_bambu_client
         
-        logger.info(f"Initializing global Bambu MQTT client: printer_id={printer_id}, ip={printer_ip}")
+        logger.info(f"Initializing global Bambu MQTT client: printer_id={printer_id}, serial={serial_number}, ip={printer_ip}")
         
         _global_bambu_client = BambuLabMQTTClient(
             printer_id=printer_id,
             printer_ip=printer_ip,
             access_code=access_code,
+            serial_number=serial_number,
             use_lan_mode=use_lan_mode
         )
         

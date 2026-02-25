@@ -20,11 +20,17 @@ class CreatePrinterRequest(BaseModel):
     """Request to register new printer"""
     printer_id: str
     printer_name: str
+    serial_number: str = None  # Actual Bambu serial for MQTT topics (e.g. '03900D5A2402051')
 
 
 class UpdatePrinterStatusRequest(BaseModel):
     """Request to update printer status"""
     printer_status: str
+
+
+class UpdateSerialNumberRequest(BaseModel):
+    """Request to update printer serial number (for MQTT topic fix)"""
+    serial_number: str
 
 
 @router.post("", status_code=201)
@@ -44,7 +50,8 @@ async def register_printer(
         printer_service = PrinterService(db)
         printer = printer_service.create_printer(
             request.printer_id,
-            request.printer_name
+            request.printer_name,
+            serial_number=request.serial_number
         )
         
         if printer is None:
@@ -53,7 +60,7 @@ async def register_printer(
                 detail=f"Printer already exists: printer_id={request.printer_id}"
             )
         
-        logger.info(f"Registered printer: printer_id={request.printer_id}, printer_name={request.printer_name}")
+        logger.info(f"Registered printer: printer_id={request.printer_id}, serial={request.serial_number}, printer_name={request.printer_name}")
         
         return printer
     
@@ -141,6 +148,46 @@ async def update_printer_status(
         raise
     except Exception as e:
         logger.error(f"Error updating printer status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{printer_id}/serial")
+async def update_printer_serial(
+    printer_id: str,
+    request: UpdateSerialNumberRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Update printer serial number (used for MQTT topics)
+    
+    ⚠️ PENTING: serial_number harus berupa actual Bambu serial, bukan IP-based ID.
+    Contoh: '03900D5A2402051' (bukan 'BAMBU_192_168_4_101')
+    
+    Setelah update, restart container agar MQTT reconnect dengan serial yang benar.
+    """
+    try:
+        from src.database.db import Printer
+        printer = db.query(Printer).filter(Printer.printer_id == printer_id).first()
+        if not printer:
+            raise HTTPException(status_code=404, detail=f"Printer not found: {printer_id}")
+        
+        old_serial = printer.serial_number
+        printer.serial_number = request.serial_number
+        db.commit()
+        
+        logger.info(f"Updated serial_number: printer_id={printer_id}, {old_serial} → {request.serial_number}")
+        
+        return {
+            "message": "Serial number updated. Restart container untuk apply perubahan MQTT.",
+            "printer_id": printer_id,
+            "old_serial_number": old_serial,
+            "new_serial_number": request.serial_number
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating serial: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

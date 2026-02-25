@@ -176,6 +176,7 @@ class Printer(Base):
     printer_name = Column(String(255), nullable=False)
     printer_ip = Column(String(50), nullable=True)  # IP address for LAN mode
     access_code = Column(String(50), nullable=True)  # Access code for MQTT/FTPS auth
+    serial_number = Column(String(100), nullable=True)  # Actual Bambu serial (e.g. 03900D5A2402051) for MQTT topics
     model = Column(String(100), default="Bambu Lab A1")
     status = Column(String(50), default="idle")  # idle, printing, paused, offline, error
     last_heartbeat = Column(DateTime, nullable=True)
@@ -305,9 +306,33 @@ class FilamentProfile(Base):
 
 
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and run migrations for new columns"""
     Base.metadata.create_all(bind=engine)
     print(f"Database initialized at: {DATABASE_PATH}")
+    
+    # Run column migrations (SQLAlchemy won't add columns to existing tables)
+    _run_migrations()
+
+
+def _run_migrations():
+    """Add new columns to existing tables if they don't exist (safe to run multiple times)"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    with engine.connect() as conn:
+        # Get raw connection for PRAGMA (SQLite)
+        raw = conn.connection
+        cursor = raw.cursor()
+        
+        # --- Migration: add serial_number to printers ---
+        cursor.execute("PRAGMA table_info(printers)")
+        cols = [row[1] for row in cursor.fetchall()]
+        if "serial_number" not in cols:
+            cursor.execute("ALTER TABLE printers ADD COLUMN serial_number VARCHAR(100)")
+            raw.commit()
+            logger.info("✅ Migration: added 'serial_number' column to printers table")
+        
+        cursor.close()
 
 
 def get_db():

@@ -16,9 +16,10 @@ services:
       - PYTHONUNBUFFERED=1
       # Printer data diambil dari database, tidak perlu env vars
       # Hanya diperlukan jika belum ada printer di database (first run)
-      - BAMBU_PRINTER_IP=${BAMBU_PRINTER_IP:-}
-      - BAMBU_PRINTER_ID=${BAMBU_PRINTER_ID:-}
+      - BAMBU_PRINTER_IP=${BAMBU_PRINTER_IP:-192.168.4.101}
+      - BAMBU_PRINTER_ID=${BAMBU_PRINTER_ID:-03900D5A2402051}
       - BAMBU_ACCESS_CODE=${BAMBU_ACCESS_CODE:-}
+      - BAMBU_SERIAL=${BAMBU_SERIAL:-03900D5A2402051}
     networks:
       - printfarm-network
     healthcheck:

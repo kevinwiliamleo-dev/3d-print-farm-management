@@ -17,13 +17,14 @@ class PrinterService:
     def __init__(self, db: Session):
         self.db = db
 
-    def create_printer(self, printer_id: str, printer_name: str) -> dict:
+    def create_printer(self, printer_id: str, printer_name: str, serial_number: str = None) -> dict:
         """
         Register new printer
         
         Args:
-            printer_id: Unique printer identifier (serial number)
+            printer_id: Unique printer identifier (database FK)
             printer_name: Display name for printer
+            serial_number: Actual Bambu serial for MQTT topics (e.g. '03900D5A2402051')
             
         Returns:
             Printer details
@@ -38,6 +39,7 @@ class PrinterService:
         printer_record = Printer(
             printer_id=printer_id,
             printer_name=printer_name,
+            serial_number=serial_number,
             status="offline",
             mqtt_connected=False,
             created_at=datetime.utcnow(),
@@ -48,11 +50,12 @@ class PrinterService:
         self.db.commit()
         self.db.refresh(printer_record)
         
-        logger.info(f"Created printer: printer_id={printer_id}, printer_name={printer_name}")
+        logger.info(f"Created printer: printer_id={printer_id}, serial={serial_number}, printer_name={printer_name}")
         
         return {
             "printer_id": printer_record.printer_id,
             "printer_name": printer_record.printer_name,
+            "serial_number": printer_record.serial_number,
             "status": printer_record.status,
             "mqtt_connected": printer_record.mqtt_connected,
             "auto_continue": printer_record.auto_continue

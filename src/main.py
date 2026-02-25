@@ -59,13 +59,23 @@ async def lifespan(app: FastAPI):
     first_printer = db.query(Printer).first()
     
     if first_printer and first_printer.printer_id:
+        # Resolve serial_number: DB > env var BAMBU_SERIAL > fallback to printer_id
+        resolved_serial = first_printer.serial_number or BAMBU_SERIAL or None
+        
+        # Auto-save resolved serial back to DB if it came from env var
+        if not first_printer.serial_number and resolved_serial:
+            logger.info(f"💾 Auto-saving serial_number from env var to DB: {resolved_serial}")
+            first_printer.serial_number = resolved_serial
+            db.commit()
+        
         bambu_client = initialize_bambu_client(
             printer_id=first_printer.printer_id,
             printer_ip=first_printer.printer_ip,
             access_code=first_printer.access_code,
+            serial_number=resolved_serial,
             use_lan_mode=True
         )
-        logger.info(f"✅ MQTT initialized for: {first_printer.printer_name} ({first_printer.printer_id}) at {first_printer.printer_ip}")
+        logger.info(f"✅ MQTT initialized for: {first_printer.printer_name} ({first_printer.printer_id}) serial={resolved_serial} at {first_printer.printer_ip}")
     else:
         # Fallback to env vars if no printer in database
         bambu_client = initialize_bambu_client(
