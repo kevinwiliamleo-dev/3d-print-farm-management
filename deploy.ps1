@@ -55,28 +55,31 @@ public class TrustAllCerts : ICertificatePolicy {
 # ============================================================
 function Get-Config {
     if (Test-Path $CONFIG_FILE) {
-        return Get-Content $CONFIG_FILE | ConvertFrom-Json
+        # Convert to hashtable so we can add new properties freely
+        $obj = Get-Content $CONFIG_FILE | ConvertFrom-Json
+        $ht = @{}
+        $obj.PSObject.Properties | ForEach-Object { $ht[$_.Name] = $_.Value }
+        return $ht
     }
-    return $null
+    return @{}
 }
 
 function Save-Config { param($config) $config | ConvertTo-Json | Set-Content $CONFIG_FILE }
 
 function Get-GithubPAT {
     $config = Get-Config
-    if ($config -and $config.github_pat) { return $config.github_pat }
+    if ($config.github_pat) { return $config.github_pat }
     Write-Warn "GitHub PAT belum tersimpan"
     $pat = Read-Host "Masukkan GitHub PAT (untuk akses GHCR)"
-    $cfg = if ($config) { $config } else { @{} }
-    $cfg.github_pat = $pat
-    $cfg.github_username = $GITHUB_USERNAME
-    Save-Config $cfg
+    $config.github_pat = $pat
+    $config.github_username = $GITHUB_USERNAME
+    Save-Config $config
     return $pat
 }
 
 function Get-PortainerToken {
     $config = Get-Config
-    if ($config -and $config.token) {
+    if ($config.token) {
         # Test apakah token masih valid
         try {
             $r = Invoke-RestMethod -Uri "$PORTAINER_URL/api/users/me" -Headers @{Authorization="Bearer $($config.token)"} -Method GET
@@ -85,9 +88,8 @@ function Get-PortainerToken {
     }
 
     # Token tidak ada / expired - coba auto-login pakai password tersimpan dulu
-    $config = Get-Config
-    $savedUsername = if ($config -and $config.username) { $config.username } else { "root" }
-    $savedPassword = if ($config -and $config.portainer_password) { $config.portainer_password } else { $null }
+    $savedUsername = if ($config.username) { $config.username } else { "root" }
+    $savedPassword = if ($config.portainer_password) { $config.portainer_password } else { $null }
 
     if ($savedPassword) {
         Write-Host "[...] Token expired, auto-login dengan credentials tersimpan..."
@@ -95,9 +97,8 @@ function Get-PortainerToken {
             $body = @{ username = $savedUsername; password = $savedPassword } | ConvertTo-Json
             $r = Invoke-RestMethod -Uri "$PORTAINER_URL/api/auth" -Method POST -Body $body -ContentType "application/json"
             $token = $r.jwt
-            $cfg = if ($config) { $config } else { @{} }
-            $cfg.token = $token
-            Save-Config $cfg
+            $config.token = $token
+            Save-Config $config
             Write-OK "Auto-login berhasil"
             return $token
         } catch {
@@ -119,13 +120,12 @@ function Get-PortainerToken {
         $token = $r.jwt
 
         # Simpan token + password untuk auto-login berikutnya
-        $cfg = if ($config) { $config } else { @{} }
-        $cfg.token = $token
-        $cfg.username = $username
-        $cfg.portainer_password = $plainPassword
-        Save-Config $cfg
+        $config.token = $token
+        $config.username = $username
+        $config.portainer_password = $plainPassword
+        Save-Config $config
 
-        Write-OK "Login berhasil - token & password disimpan"
+        Write-OK "Login berhasil - token & password disimpan (auto-login aktif)"
         return $token
     } catch {
         Write-Fail "Login gagal: $_"
