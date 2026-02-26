@@ -367,3 +367,166 @@
     border-radius: 12px;
   }
 }
+
+/* ============================================
+   MOBILE OPTIMIZATIONS (phones ≤ 640px)
+   Desktop/tablet layout is untouched.
+   ============================================ */
+
+@media (max-width: 640px) {
+
+  /* --- Sidebar: hide hover-only panel (non-functional on touch) --- */
+  .sidebar-container {
+    display: none;
+  }
+
+  /* --- Header: compact row + stats wrap below --- */
+  .dashboard-header {
+    padding: 10px 14px;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  /* Title block stays order:1 (default), take remaining width */
+  .dashboard-header > div:first-child {
+    flex: 1 1 auto;
+  }
+
+  /* Find Printer button: compact, on same row as title */
+  .header-find-btn {
+    padding: 8px 14px !important;
+    font-size: 13px !important;
+    order: 2;
+    flex-shrink: 0;
+  }
+
+  /* Stats row: move to second line, full width, compact pill style */
+  .header-stats-row {
+    order: 3;
+    width: 100%;
+    gap: 6px !important;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .header-stats-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Each stat badge: smaller */
+  .header-stats-row > div {
+    padding: 4px 10px !important;
+    border-radius: 20px !important;
+    gap: 4px !important;
+    flex-shrink: 0;
+  }
+
+  .header-stats-row > div > span:first-child {
+    font-size: 13px !important;
+  }
+
+  .header-stats-row > div > span:nth-child(2) {
+    font-size: 15px !important;
+  }
+
+  .header-stats-row > div > span:nth-child(3) {
+    font-size: 10px !important;
+  }
+
+  /* --- Main content: full width, no sidebar offset --- */
+  .main-content {
+    padding: 0 12px 90px !important; /* extra bottom for iOS safe area */
+  }
+
+  /* --- Tab navigation: tabs on top row (scroll), printer info below --- */
+  .tab-navigation {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding-bottom: 10px !important;
+  }
+
+  /* Tabs: horizontal scrollable strip */
+  .tab-bar-tabs {
+    display: flex !important;
+    gap: 4px !important;
+    overflow-x: auto !important;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .tab-bar-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Tab buttons: touch-friendly */
+  .tab-button {
+    padding: 9px 14px !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    border-radius: 8px !important;
+    min-height: 38px;
+    min-width: 44px; /* iOS touch target */
+  }
+
+  /* Printer status row: full width below tabs */
+  .tab-status-row {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    padding: 6px 10px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .tab-status-row > div {
+    font-size: 11px !important;
+  }
+
+  /* Divider between printer name and status badges */
+  .tab-status-row > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  /* Notification toast: full width on mobile */
+  .notification-toast {
+    right: 12px !important;
+    left: 12px !important;
+    top: auto !important;
+    bottom: 80px !important;
+  }
+}
+
+/* Extra small phones (< 380px) */
+@media (max-width: 380px) {
+  .dashboard-header {
+    padding: 8px 12px;
+  }
+
+  .tab-button {
+    padding: 7px 10px !important;
+    font-size: 11px !important;
+  }
+
+  .header-find-btn {
+    font-size: 12px !important;
+    padding: 7px 10px !important;
+  }
+}
+
+/* iOS safe area support */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  @media (max-width: 640px) {
+    .main-content {
+      padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+    }
+  }
+}

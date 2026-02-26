@@ -520,7 +520,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Stats in Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div className="header-stats-row" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
             <span style={{ fontSize: '16px' }}>🖨️</span>
             <span style={{ fontSize: '18px', fontWeight: 700, color: '#1f2937' }}>{printers.length}</span>
@@ -544,6 +544,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <button
+          className="header-find-btn"
           onClick={() => setShowAddModal(true)}
           style={{
             padding: '12px 24px',
@@ -654,7 +655,7 @@ export const Dashboard: React.FC = () => {
         <div style={{ minWidth: 0 }}>
           {/* Tab Navigation with Status indicators */}
           <div className="tab-navigation" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="tab-bar-tabs" style={{ display: 'flex', gap: '8px' }}>
               {[
                 { id: 'status' as TabType, label: '📊 Status', icon: '📊' },
                 { id: 'queue' as TabType, label: '📋 Queue & Upload', icon: '📋' },
@@ -681,7 +682,7 @@ export const Dashboard: React.FC = () => {
             
             {/* Printer name + Status & MQTT indicators */}
             {selectedPrinter && (
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div className="tab-status-row" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                 {/* Printer name */}
                 <div style={{
                   display: 'flex',
