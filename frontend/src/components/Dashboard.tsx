@@ -89,8 +89,11 @@ export const Dashboard: React.FC = () => {
       // Get first printer ID (assuming single printer setup)
       const printer = printers[0];
       if (!printer) return;
-      
-      await fetch(`http://localhost:5000/api/printers/${printer.printerId}/bed-cooling/configure`, {
+
+      // Use dynamic backend URL (same hostname as frontend, port 5051)
+      // so this works correctly from any device on the network
+      const backendUrl = `${window.location.protocol}//${window.location.hostname}:5051`;
+      await fetch(`${backendUrl}/api/printers/${printer.printerId}/bed-cooling/configure`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kit_ip: kitIp, enabled: true })
@@ -285,6 +288,27 @@ export const Dashboard: React.FC = () => {
       
       if (list.length > 0 && !selectedPrinterId) {
         setSelectedPrinterId(list[0].printerId);
+      }
+
+      // Sync kit IP from database so ALL devices (mobile, tablet, etc.) auto-load
+      // the kit config without needing to re-enter it
+      const dbKitIp = (list[0] as any)?.kitIp;
+      if (dbKitIp) {
+        setKits(prev => {
+          const alreadyExists = prev.some(k => k.ip === dbKitIp);
+          if (!alreadyExists) {
+            const synced = [{
+              id: 'db-synced',
+              ip: dbKitIp,
+              cameraConnected: false,
+              fanConnected: false,
+              fanState: 'unknown' as const
+            }];
+            localStorage.setItem('kits', JSON.stringify(synced));
+            return synced;
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.error('Failed to load printers:', err);

@@ -138,6 +138,8 @@ interface PrinterResponse {
   // Printer info
   ipAddress?: string;
   model?: string;
+  kitIp?: string;       // ESP32 Kit IP address (stored in DB, shared across devices)
+  kitEnabled?: boolean; // Whether bed cooling kit is enabled
   // Time data
   remainingTime?: number;  // seconds remaining
   currentFile?: string;  // currently printing file
@@ -484,6 +486,8 @@ class PrintFarmClient {
       // Printer info
       ipAddress: p.ip_address || '',
       model: p.model || '',
+      kitIp: p.kit_ip || '',
+      kitEnabled: p.kit_enabled || false,
       // Time data
       remainingTime: p.remaining_time || 0,
       currentFile: p.current_file || '',

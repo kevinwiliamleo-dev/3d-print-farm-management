@@ -83,6 +83,8 @@ class PrinterService:
             "print_error": printer.print_error or "",
             "model": printer.model or "",
             "printer_ip": printer.printer_ip or "",
+            "kit_ip": printer.kit_ip or None,
+            "kit_enabled": printer.kit_enabled or False,
             "created_at": printer.created_at,
             "updated_at": printer.updated_at
         }
@@ -107,7 +109,9 @@ class PrinterService:
                 "current_file": p.current_file or "",
                 "print_error": p.print_error or "",
                 "model": p.model or "",
-                "printer_ip": p.printer_ip or ""
+                "printer_ip": p.printer_ip or "",
+                "kit_ip": p.kit_ip or None,
+                "kit_enabled": p.kit_enabled or False
             }
             for p in printers
         ]
