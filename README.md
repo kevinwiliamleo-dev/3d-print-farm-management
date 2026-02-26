@@ -93,6 +93,34 @@ git push origin main
 
 ## 🆕 Recent Updates (February 2026)
 
+**Mobile Responsive UI Improvements (February 26, 2026):**
+- ✅ **Tampilan HP Dioptimasi (Desktop Tidak Berubah)**
+  - **Problem**: Layout tidak optimal di layar kecil — sidebar hover-only tidak bisa dipakai di touch, stats header overflow, tab navigation terlalu padat
+  - **Solution**: Tambah CSS `@media (max-width: 640px)` di `App.css` — hanya berlaku untuk HP, desktop layout 100% tidak berubah
+  - **Changes**:
+    - Sidebar hover-only disembunyikan di mobile (tidak fungsi di touch screen)
+    - Header: Find Printer button compact sejajar dengan title
+    - Header stats: scrollable pill row di bawah title
+    - Tab navigation: tabs scrollable horizontal strip, printer status info wrap ke baris bawah
+    - Tab buttons: touch-friendly (min 38px height, min-width 44px per iOS guideline)
+    - iOS Safe Area support (`env(safe-area-inset-bottom)`)
+  - **Files**: `frontend/src/App.css`, `frontend/src/components/Dashboard.tsx`
+  - **Commits**: `f7b4aac`
+
+**Kit IP Cross-Device Sync via Database (February 26, 2026):**
+- ✅ **Kit IP Tersimpan di DB & Otomatis Load di Semua Perangkat**
+  - **Problem**: Kit IP (`192.168.4.197`) disimpan di `localStorage` browser — setiap perangkat baru (HP, tablet) harus input ulang karena `localStorage` isolated per browser
+  - **Root Cause #1**: `kits` state di-init dari `localStorage` → tidak dibagikan antar perangkat
+  - **Root Cause #2**: `configureKitForPrinter()` hardcode URL `http://localhost:5000/...` → dari HP, `localhost` = HP itu sendiri (bukan server) + port salah (5000 bukan 5051) → request selalu gagal → `kit_ip` di database tetap NULL
+  - **Solution**:
+    - `printer_service.py`: expose `kit_ip` dan `kit_enabled` di response `get_all_printers()` dan `get_printer_by_id()`
+    - `client.ts`: tambah `kitIp`/`kitEnabled` ke `PrinterResponse` interface dan `transformPrinter()`
+    - `Dashboard.tsx`: fix URL ke `${window.location.hostname}:5051` (dinamis, benar dari device manapun)
+    - `Dashboard.tsx`: `loadPrinters()` auto-sync kit dari DB → `setKits()` jika belum ada lokal
+  - **Result**: Setup kit sekali dari device manapun → semua device lain auto-load tanpa input ulang
+  - **Files**: `src/services/printer_service.py`, `frontend/src/api/client.ts`, `frontend/src/components/Dashboard.tsx`
+  - **Commits**: `811ca64`
+
 **Orange Pi kit_api.py GPIO Status Fix (February 26, 2026):**
 - ✅ **Status Endpoint Baca GPIO Hardware Langsung (bukan variabel memory)**
   - **Problem**: `/kit/fan?state=status` membaca variabel Python `current_fan_state` (in-memory, default `False`). Jika service restart, variabel reset ke `False` meskipun GPIO pin masih HIGH → status salah
