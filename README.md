@@ -100,7 +100,9 @@ git push origin main
   - **Fix 1 — Infinite retry**: Daripada `return` saat max tercapai, reset counter ke 0 dan lanjut retry dengan delay panjang (120s). Tidak pernah menyerah.
   - **Fix 2 — Reconnect fallback**: Jika `client.reconnect()` gagal (paho socket state rusak), fallback ke full `client.connect()` untuk reset socket sepenuhnya
   - **Fix 3 — Watchdog thread**: Thread baru `mqtt-watchdog` cek setiap 60s — jika MQTT disconnected dan reconnect thread mati unexpected, restart reconnect thread otomatis (safety net terakhir)
+  - **Verified**: Log NUC konfirmasi `🐕 MQTT watchdog started (interval=60s)` aktif saat startup
   - **File**: `src/services/bambu_service.py` — `_reconnect_loop()`, `_start_watchdog_thread()`, `_watchdog_loop()`
+  - **Commit**: `1311f44`
 
 ## 🆕 Recent Updates (February 2026)
 
@@ -933,8 +935,9 @@ Endpoints:
   GET  /kit/fan?state=status → {"status": "ON"|"OFF"}
 ```
 
-### Connection Status (Last Tested: February 26, 2026)
-- ✅ MQTT Connection: Working
+### Connection Status (Last Tested: March 3, 2026)
+- ✅ MQTT Connection: Working (+ infinite reconnect, commit `1311f44`)
+- ✅ MQTT Watchdog: Active — `mqtt-watchdog` thread running (interval=60s)
 - ✅ Status Push: Receiving printer status (real-time)
 - ✅ Auto-Eject: Working (G28 X Y + G1 Y 230)
 - ✅ Print Start Command: API working with SD card files
