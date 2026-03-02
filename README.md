@@ -91,6 +91,17 @@ git push origin main
 - Success/failure rates
 - Print duration analytics
 
+## 🆕 Recent Updates (March 2026)
+
+**MQTT Infinite Reconnect Fix (March 3, 2026):**
+- ✅ **Root Cause Ditemukan & Diperbaiki: MQTT Disconnected Permanen**
+  - **Problem**: Setelah printer offline ≥~14 menit, sistem berhenti mencoba reconnect dan masuk state `ABORTED` — MQTT tetap disconnected selamanya sampai backend direstart
+  - **Root Cause**: `_reconnect_loop` berhenti total (`return`) setelah `max_reconnect_attempts` (10) tercapai. `connection_state.reconnect_attempts` tidak pernah reset → setiap subsequence disconnect langsung ABORTED
+  - **Fix 1 — Infinite retry**: Daripada `return` saat max tercapai, reset counter ke 0 dan lanjut retry dengan delay panjang (120s). Tidak pernah menyerah.
+  - **Fix 2 — Reconnect fallback**: Jika `client.reconnect()` gagal (paho socket state rusak), fallback ke full `client.connect()` untuk reset socket sepenuhnya
+  - **Fix 3 — Watchdog thread**: Thread baru `mqtt-watchdog` cek setiap 60s — jika MQTT disconnected dan reconnect thread mati unexpected, restart reconnect thread otomatis (safety net terakhir)
+  - **File**: `src/services/bambu_service.py` — `_reconnect_loop()`, `_start_watchdog_thread()`, `_watchdog_loop()`
+
 ## 🆕 Recent Updates (February 2026)
 
 **Mobile Responsive UI Improvements (February 26, 2026):**
@@ -962,6 +973,7 @@ Endpoints:
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
+| MQTT disconnected permanen, tidak reconnect sampai restart | `_reconnect_loop` berhenti total setelah 10 attempts (`SocketState.ABORTED`) | **Fixed (March 3, 2026)**: counter di-reset → infinite retry. Watchdog thread backup. |
 | Rapid disconnect/reconnect (flapping) | Multiple MQTT clients attempting connection | Use global client from `main.py`, disable local client in `print_control.py` |
 | "Initializing MQTT client in Cloud mode" with empty printer_id | `print_control.py` creating new client on each API call | Ensure all config in database, not environment variables |
 | Connection stable but logs show repeated connect attempts | Dual client initialization (global + local) | Remove local client initialization, use global only |

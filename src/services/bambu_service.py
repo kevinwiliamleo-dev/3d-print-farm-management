@@ -386,6 +386,11 @@ class BambuLabMQTTClient:
         self._stop_heartbeat = threading.Event()
         self.HEARTBEAT_INTERVAL = 30.0  # Request status every 30 seconds
         
+        # Watchdog: safety net jika reconnect thread mati unexpected
+        self._watchdog_thread: Optional[threading.Thread] = None
+        self._stop_watchdog = threading.Event()
+        self.WATCHDOG_INTERVAL = 60.0  # Cek koneksi setiap 60 detik
+        
         # Callbacks
         self.on_status_update: Optional[Callable] = None
         self.on_print_complete: Optional[Callable] = None
@@ -481,10 +486,14 @@ class BambuLabMQTTClient:
                 self._update_api_state(ApiState.RESPONDING)
                 self.connection_state.reconnect_attempts = 0  # Reset on success
                 logger.info(f"Successfully connected to Bambu Lab MQTT ({'LAN' if self.use_lan_mode else 'Cloud'} mode)")
+                # Start watchdog untuk monitor koneksi
+                self._start_watchdog_thread()
                 return True
             else:
                 self._update_socket_state(SocketState.ERROR)
                 logger.error("Failed to connect to Bambu Lab MQTT (timeout)")
+                # Tetap start watchdog — watchdog akan kick off reconnect loop
+                self._start_watchdog_thread()
                 return False
                 
         except Exception as e:
@@ -501,6 +510,11 @@ class BambuLabMQTTClient:
             self._stop_reconnect.set()
             if self._reconnect_thread and self._reconnect_thread.is_alive():
                 self._reconnect_thread.join(timeout=2)
+            
+            # Stop watchdog
+            self._stop_watchdog.set()
+            if self._watchdog_thread and self._watchdog_thread.is_alive():
+                self._watchdog_thread.join(timeout=2)
             
             self.client.loop_stop()
             self.client.disconnect()
@@ -519,18 +533,67 @@ class BambuLabMQTTClient:
         
         self._reconnect_thread = threading.Thread(target=self._reconnect_loop, daemon=True)
         self._reconnect_thread.start()
-    
+
+    def _start_watchdog_thread(self):
+        """Start background watchdog thread.
+        
+        Watchdog cek setiap WATCHDOG_INTERVAL detik: jika MQTT tidak connected
+        dan reconnect thread mati (unexpected crash), restart reconnect thread.
+        Ini adalah safety net terakhir — memastikan sistem selalu berusaha reconnect.
+        """
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            return  # Sudah jalan
+        self._stop_watchdog.clear()
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.name = "mqtt-watchdog"
+        self._watchdog_thread.start()
+        logger.info(f"🐕 MQTT watchdog started (interval={self.WATCHDOG_INTERVAL:.0f}s)")
+
+    def _watchdog_loop(self):
+        """Watchdog loop: pastikan reconnect thread selalu berjalan saat disconnected."""
+        while not self._stop_watchdog.wait(self.WATCHDOG_INTERVAL):
+            if self.mqtt_connected:
+                continue  # OK, tidak perlu tindakan
+
+            if self._stop_reconnect.is_set():
+                continue  # Disconnect disengaja (shutdown), skip
+
+            # Cek apakah reconnect thread masih hidup
+            reconnect_alive = self._reconnect_thread and self._reconnect_thread.is_alive()
+            if not reconnect_alive:
+                logger.warning(
+                    "🐕 Watchdog: MQTT disconnected dan reconnect thread tidak aktif — "
+                    "restart reconnect thread..."
+                )
+                self.connection_state.reconnect_attempts = 0  # Reset agar segera coba
+                self._start_reconnect_thread()
+            else:
+                logger.debug("🐕 Watchdog: MQTT disconnected, reconnect thread aktif — menunggu...")
+
     def _reconnect_loop(self):
-        """Background reconnection loop with exponential backoff"""
+        """Background reconnection loop with exponential backoff.
+        
+        Infinite retry: setelah max_reconnect_attempts, reset counter dan terus coba
+        dengan delay panjang. Tidak pernah menyerah — printer bisa offline lama (malam hari, dll).
+        """
         while not self._stop_reconnect.is_set():
             if self.connection_state.reconnect_attempts >= self.max_reconnect_attempts:
-                logger.error(f"❌ Max reconnection attempts ({self.max_reconnect_attempts}) reached. Giving up.")
-                self._update_socket_state(SocketState.ABORTED)
-                return
+                # Jangan menyerah — reset counter, terus coba tiap 120s
+                logger.warning(
+                    f"⚠️ Reached {self.max_reconnect_attempts} reconnect attempts. "
+                    f"Resetting counter — will keep retrying every {self.DEFAULT_RECONNECT_DELAY_MAX:.0f}s "
+                    f"(printer may be offline)"
+                )
+                self.connection_state.reconnect_attempts = 0
+                self._update_socket_state(SocketState.ERROR)
+                # Tunggu delay panjang sebelum mulai lagi
+                if self._stop_reconnect.wait(self.DEFAULT_RECONNECT_DELAY_MAX):
+                    return
+                continue
             
             self.connection_state.reconnect_attempts += 1
             
-            # Exponential backoff: 5s, 10s, 20s, 40s... max 60s
+            # Exponential backoff: 10s, 20s, 40s, 80s... max 120s
             delay = min(
                 self.DEFAULT_RECONNECT_DELAY * (2 ** (self.connection_state.reconnect_attempts - 1)),
                 self.DEFAULT_RECONNECT_DELAY_MAX
@@ -545,7 +608,14 @@ class BambuLabMQTTClient:
             # Try to reconnect
             try:
                 self._update_socket_state(SocketState.OPENING)
-                self.client.reconnect()
+                
+                # Coba client.reconnect() dulu (reuse socket setup paho)
+                # Jika gagal, fallback ke full connect() untuk reset socket state
+                try:
+                    self.client.reconnect()
+                except Exception as reconnect_err:
+                    logger.warning(f"client.reconnect() failed: {reconnect_err} — falling back to full connect()")
+                    self.client.connect(self.mqtt_broker, self.mqtt_port, keepalive=60)
                 
                 # Wait for connection
                 start_time = time.time()
@@ -560,7 +630,7 @@ class BambuLabMQTTClient:
                     return
                     
             except Exception as e:
-                logger.warning(f"Reconnection attempt failed: {e}")
+                logger.warning(f"Reconnection attempt {self.connection_state.reconnect_attempts} failed: {e}")
                 self._update_socket_state(SocketState.ERROR)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
