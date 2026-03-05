@@ -1946,7 +1946,10 @@ G1 X0 Y250 F12000 ; move to back corner
             # Reference: fdm-monster/src/services/bambu/bambu-mqtt.adapter.ts line 291-305
             
             # Remove any leading slashes from filename to avoid double slashes
+            # Also sanitize: replace spaces/special chars (same as FTPS upload sanitization)
+            import re as _re
             clean_filename = filename.lstrip('/').lstrip('\\')
+            clean_filename = _re.sub(r'[^\w\-\./]', '_', clean_filename)
             file_url = f"file:///sdcard/{clean_filename}"
             
             # Generate sequence_id like FDM Monster does

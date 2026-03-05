@@ -231,16 +231,24 @@ class QueueService:
             
             with ftps_client as ftp:
                 logger.info(f"FTPS connected to {BAMBU_PRINTER_IP}:990")
-                success = ftp.upload_file(str(file_path), job.filename)
+                
+                # CRITICAL: Sanitize filename before upload
+                # Spaces and special chars cause "fail to parse the file" on Bambu printer
+                import re
+                safe_filename = re.sub(r'[^\w\-\.]', '_', job.filename)
+                if safe_filename != job.filename:
+                    logger.info(f"📝 Filename sanitized: '{job.filename}' → '{safe_filename}'")
+                
+                success = ftp.upload_file(str(file_path), safe_filename)
                 logger.info(f"FTPS upload result: {success}")
                 
                 if not success:
-                    logger.error(f"❌ FTPS upload failed: {job.filename}")
+                    logger.error(f"❌ FTPS upload failed: {safe_filename}")
                     queue_item.status = "error"
                     self.db.commit()
                     return False
             
-            logger.info(f"✅ File uploaded to SD card: {job.filename}")
+            logger.info(f"✅ File uploaded to SD card: {safe_filename}")
             
             # Step 2: Send MQTT command to start printing
             logger.info(f"🚀 Step 2: Sending print command via MQTT...")
@@ -267,8 +275,9 @@ class QueueService:
             
             # Start print from SD card with simplified settings
             # CRITICAL: Pass ams_slot as integer, bambu_service will convert to proper list format
+            # Use safe_filename (sanitized) - same name as what was uploaded via FTPS
             print_success = bambu_client.start_print_from_sd(
-                filename=job.filename,
+                filename=safe_filename,
                 use_ams=use_ams,
                 plate_number=1,
                 ams_mapping=None,  # Let bambu_service convert from ams_slot

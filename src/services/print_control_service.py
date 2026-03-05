@@ -240,7 +240,13 @@ class PrintControlService:
                 )
                 
                 with ftps_client as ftp:
-                    remote_filename = os.path.basename(file_path)
+                    # CRITICAL: Sanitize filename before upload
+                    # Spaces and special chars cause "fail to parse the file" on printer
+                    import re
+                    raw_filename = os.path.basename(file_path)
+                    remote_filename = re.sub(r'[^\w\-\.]', '_', raw_filename)
+                    if remote_filename != raw_filename:
+                        logger.info(f"📝 Filename sanitized: '{raw_filename}' → '{remote_filename}'")
                     file_size = os.path.getsize(file_path)
                     
                     # Progress callback that broadcasts to WebSocket
@@ -475,7 +481,13 @@ class PrintControlService:
                 )
                 
                 with ftps_client as ftp:
-                    remote_filename = os.path.basename(file_path)
+                    # CRITICAL: Sanitize filename before upload
+                    # Spaces and special chars cause "fail to parse the file" on printer
+                    import re
+                    raw_filename = os.path.basename(file_path)
+                    remote_filename = re.sub(r'[^\w\-\.]', '_', raw_filename)
+                    if remote_filename != raw_filename:
+                        logger.info(f"📝 Filename sanitized: '{raw_filename}' → '{remote_filename}'")
                     file_size = os.path.getsize(file_path)
                     
                     # Progress callback

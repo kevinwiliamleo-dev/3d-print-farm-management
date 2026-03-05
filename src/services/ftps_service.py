@@ -191,6 +191,16 @@ class SimpleFTPSClient:
                             conn.unwrap()
                         else:
                             conn.shutdown(socket.SHUT_RDWR)
+                
+                # CRITICAL: Wait for server "226 Transfer complete" confirmation
+                # Without this, the file may be incomplete/corrupt on the printer
+                # OctoPrint-BambuPrinter calls voidresp() after data connection closes
+                try:
+                    self.ftp.voidresp()
+                    logger.info(f"✅ Server confirmed transfer complete: {remote_filename}")
+                except Exception as resp_err:
+                    logger.error(f"❌ Server did not confirm transfer: {resp_err}")
+                    return False
             
             logger.info(f"✅ Upload successful: {remote_filename} ({file_size} bytes sent)")
             return True
