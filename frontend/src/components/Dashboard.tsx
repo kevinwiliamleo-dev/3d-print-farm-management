@@ -763,6 +763,7 @@ export const Dashboard: React.FC = () => {
               onRefresh={loadPrinters}
               showUpload={true}
               printers={printers.map(p => ({ printerId: p.printerId, printerName: p.printerName }))}
+              printerStatus={selectedPrinter?.status}
             />
           )}
           

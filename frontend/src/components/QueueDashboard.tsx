@@ -56,9 +56,10 @@ interface QueueDashboardProps {
   onRefresh?: () => void;
   showUpload?: boolean;
   printers?: PrinterInfo[];
+  printerStatus?: string; // 'printing' | 'idle' | 'paused' | 'offline'
 }
 
-export const QueueDashboard: React.FC<QueueDashboardProps> = ({ printerId, onRefresh, showUpload = false, printers = [] }) => {
+export const QueueDashboard: React.FC<QueueDashboardProps> = ({ printerId, onRefresh, showUpload = false, printers = [], printerStatus }) => {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [stats, setStats] = useState<QueueStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -457,12 +458,17 @@ export const QueueDashboard: React.FC<QueueDashboardProps> = ({ printerId, onRef
     }
   };
 
-  const handleRemove = async (queueId: number) => {
-    if (!window.confirm('Remove this job from queue?')) return;
+  const handleRemove = async (queueId: number, itemStatus?: string) => {
+    const isStuck = itemStatus === 'running' && printerStatus !== 'printing';
+    const confirmMsg = isStuck
+      ? '⚠️ Queue status is "running" but printer is not printing.\nForce remove this stuck job?'
+      : 'Remove this job from queue?';
+    
+    if (!window.confirm(confirmMsg)) return;
     
     try {
       await printFarmClient.removeFromQueue(queueId);
-      setMessage({ type: 'success', text: 'Job removed from queue' });
+      setMessage({ type: 'success', text: isStuck ? 'Stuck job removed from queue' : 'Job removed from queue' });
       loadQueue();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to remove job' });
@@ -1229,24 +1235,37 @@ export const QueueDashboard: React.FC<QueueDashboardProps> = ({ printerId, onRef
                   ✏️
                 </button>
                 <button
-                  onClick={() => handleRemove(item.queue_id)}
-                  disabled={item.status === 'running'}
+                  onClick={() => handleRemove(item.queue_id, item.status)}
+                  disabled={item.status === 'running' && printerStatus === 'printing'}
                   style={{
                     padding: '0',
                     borderRadius: '4px',
                     border: 'none',
-                    backgroundColor: item.status !== 'running' ? '#fee2e2' : '#f3f4f6',
-                    color: item.status !== 'running' ? '#b91c1c' : '#9ca3af',
+                    backgroundColor: item.status === 'running' && printerStatus !== 'printing'
+                      ? '#fff7ed'  // orange-tinted when stuck
+                      : item.status !== 'running'
+                      ? '#fee2e2'
+                      : '#f3f4f6',
+                    color: item.status === 'running' && printerStatus !== 'printing'
+                      ? '#ea580c'  // orange when stuck
+                      : item.status !== 'running'
+                      ? '#b91c1c'
+                      : '#9ca3af',
                     fontSize: '13px',
-                    cursor: item.status === 'running' ? 'not-allowed' : 'pointer',
-                    opacity: item.status === 'running' ? 0.4 : 1,
+                    cursor: item.status === 'running' && printerStatus === 'printing' ? 'not-allowed' : 'pointer',
+                    opacity: item.status === 'running' && printerStatus === 'printing' ? 0.4 : 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
-                  title="Remove"
+                  title={item.status === 'running' && printerStatus !== 'printing'
+                    ? 'Force Remove (job stuck - printer not printing)'
+                    : item.status === 'running'
+                    ? 'Cannot remove while printing'
+                    : 'Remove'
+                  }
                 >
-                  ✕
+                  {item.status === 'running' && printerStatus !== 'printing' ? '⚠️' : '✕'}
                 </button>
                 <div></div>
               </div>
