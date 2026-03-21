@@ -197,7 +197,15 @@ def parse_gcode_metadata(gcode_content: str) -> Dict[str, Any]:
     # Reference: OrcaSlicer GCodeProcessor.hpp ETags, ha-bambulab commands.py
     # NOTE: bed_leveling, flow_cali, vibration_cali are RUNTIME options sent via JSON
     #       when print starts - they are NOT embedded in the G-code file!
-    full_content = gcode_content  # Use full content for automation detection
+    #
+    # Optimization: Section markers and tags are found in header (startup code)
+    # and footer (end code). The middle of G-code is just coordinates.
+    # Use header (first 100KB) + footer (last 100KB) instead of full content.
+    _SCAN_SIZE = 100_000  # 100KB each for header and footer
+    if len(gcode_content) > _SCAN_SIZE * 2:
+        scan_content = gcode_content[:_SCAN_SIZE] + "\n" + gcode_content[-_SCAN_SIZE:]
+    else:
+        scan_content = gcode_content
     
     # ==== SECTION MARKERS & G-CODE COMMANDS ====
     # Reference: Actual G-code files from Bambu A1/X1 printers with OrcaSlicer/BambuStudio
@@ -207,10 +215,10 @@ def parse_gcode_metadata(gcode_content: str) -> Dict[str, Any]:
     # ---- BED LEVELING ----
     # Section: ;===== bed leveling ==================================
     # Command: G29 (Auto Bed Leveling)
-    if re.search(r';=+\s*bed\s*leveling\s*=+', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*bed\s*leveling\s*=+', scan_content, re.IGNORECASE):
         metadata['has_bed_leveling'] = True
         logger.debug("Detected bed leveling section marker")
-    elif re.search(r'\bG29\s+A', full_content):  # G29 A1 X... is ABL command
+    elif re.search(r'\bG29\s+A', scan_content):  # G29 A1 X... is ABL command
         metadata['has_bed_leveling'] = True
         logger.debug("Detected G29 bed leveling command")
     
@@ -218,51 +226,51 @@ def parse_gcode_metadata(gcode_content: str) -> Dict[str, Any]:
     # Section: ;===== auto extrude cali start =========================
     # Section: ;===== extrude cali test ===============================
     # Commands: M983 (dynamic extrusion compensation), M984 (extrusion test)
-    if re.search(r';=+\s*(?:auto\s+)?extrude\s*cali', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*(?:auto\s+)?extrude\s*cali', scan_content, re.IGNORECASE):
         metadata['has_flow_calibration'] = True
         logger.debug("Detected flow calibration section marker")
-    elif re.search(r'\bM983\b', full_content):
+    elif re.search(r'\bM983\b', scan_content):
         metadata['has_flow_calibration'] = True
         logger.debug("Detected M983 flow calibration command")
-    elif re.search(r'\bM984\b', full_content):
+    elif re.search(r'\bM984\b', scan_content):
         metadata['has_flow_calibration'] = True
         logger.debug("Detected M984 flow calibration command")
     
     # ---- VIBRATION TEST (Mech Mode Fast Check) ----
     # Section: ;===== mech mode fast check start =====================
     # Commands: M970.2, M970.3 (vibration compensation), M974 (resonance test)
-    if re.search(r';=+\s*mech\s*mode\s*(?:fast\s*)?check', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*mech\s*mode\s*(?:fast\s*)?check', scan_content, re.IGNORECASE):
         metadata['has_vibration_test'] = True
         logger.debug("Detected vibration test section marker")
-    elif re.search(r'\bM970\.[23]\b', full_content):
+    elif re.search(r'\bM970\.[23]\b', scan_content):
         metadata['has_vibration_test'] = True
         logger.debug("Detected M970.x vibration test command")
-    elif re.search(r'\bM974\b', full_content):
+    elif re.search(r'\bM974\b', scan_content):
         metadata['has_vibration_test'] = True
         logger.debug("Detected M974 resonance test command")
     
     # ---- TIMELAPSE ----
     # Section: ;===== timelapse wipe start ===== 
     # Command: M971 (timelapse photo)
-    if re.search(r';=+\s*timelapse', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*timelapse', scan_content, re.IGNORECASE):
         metadata['has_timelapse'] = True
         logger.debug("Detected timelapse section marker")
-    elif re.search(r'\bM971\b', full_content):
+    elif re.search(r'\bM971\b', scan_content):
         metadata['has_timelapse'] = True
         logger.debug("Detected M971 timelapse command")
     
     # ---- STARTUP SOUND ----
     # Section: ;=====start printer sound ===================
-    if re.search(r';=+\s*start\s*(?:printer\s*)?sound\s*=+', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*start\s*(?:printer\s*)?sound\s*=+', scan_content, re.IGNORECASE):
         metadata['has_startup_sound'] = True
         logger.debug("Detected start sound section")
     
     # ---- END/FINISH SOUND ----
     # Section: ;=====printer finish  sound=========
-    if re.search(r';=+\s*(?:printer\s+)?finish\s+sound\s*=+', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*(?:printer\s+)?finish\s+sound\s*=+', scan_content, re.IGNORECASE):
         metadata['has_end_sound'] = True
         logger.debug("Detected finish sound section")
-    elif re.search(r';=+\s*end\s*(?:printer\s*)?sound\s*=+', full_content, re.IGNORECASE):
+    elif re.search(r';=+\s*end\s*(?:printer\s*)?sound\s*=+', scan_content, re.IGNORECASE):
         metadata['has_end_sound'] = True
         logger.debug("Detected end sound section")
     
@@ -270,7 +278,7 @@ def parse_gcode_metadata(gcode_content: str) -> Dict[str, Any]:
     # Section: ;===== wipe nozzle ===============================
     # Section: ;===== brush material wipe nozzle =====
     # Section: ;===== remove waste by touching start =====
-    if re.search(r';=+\s*(?:wipe\s*nozzle|brush\s*material|remove\s*waste|clean\s*nozzle)', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*(?:wipe\s*nozzle|brush\s*material|remove\s*waste|clean\s*nozzle)', scan_content, re.IGNORECASE):
         metadata['has_clean_nozzle'] = True
         logger.debug("Detected nozzle wipe/clean section")
     
@@ -278,22 +286,22 @@ def parse_gcode_metadata(gcode_content: str) -> Dict[str, Any]:
     # These are inline tags used by OrcaSlicer's GCodeProcessor
     
     # Wipe Tower detection - ;WIPE_TOWER_START / ;WIPE_TOWER_END
-    if re.search(r';\s*WIPE_TOWER_START', full_content):
+    if re.search(r';\s*WIPE_TOWER_START', scan_content):
         metadata['has_wipe_tower'] = True
         logger.debug("Detected WIPE_TOWER_START tag in gcode")
     
     # Color Change detection - ;COLOR_CHANGE
-    if re.search(r';\s*COLOR_CHANGE', full_content):
+    if re.search(r';\s*COLOR_CHANGE', scan_content):
         metadata['has_color_change'] = True
         logger.debug("Detected COLOR_CHANGE tag in gcode")
     
     # Pause Print detection - ;PAUSE_PRINT
-    if re.search(r';\s*PAUSE_PRINT', full_content):
+    if re.search(r';\s*PAUSE_PRINT', scan_content):
         metadata['has_pause_print'] = True
         logger.debug("Detected PAUSE_PRINT tag in gcode")
     
     # Layer Change detection - ;LAYER_CHANGE
-    if re.search(r';\s*LAYER_CHANGE', full_content):
+    if re.search(r';\s*LAYER_CHANGE', scan_content):
         metadata['has_layer_change_markers'] = True
         logger.debug("Detected LAYER_CHANGE tag in gcode")
     
@@ -301,7 +309,7 @@ def parse_gcode_metadata(gcode_content: str) -> Dict[str, Any]:
     # NOTE: M991 S0 P-1 is for END TIMELAPSE, not auto-eject!
     # Auto-eject requires specific section marker or G-code sequence
     # Section: ;===== auto eject ===== or ;===== push off =====
-    if re.search(r';=+\s*(?:auto\s*eject|push\s*off|eject\s*print)\s*=+', full_content, re.IGNORECASE):
+    if re.search(r';=+\s*(?:auto\s*eject|push\s*off|eject\s*print)\s*=+', scan_content, re.IGNORECASE):
         metadata['has_auto_eject'] = True
         logger.debug("Detected auto-eject section in gcode")
     
@@ -399,9 +407,15 @@ def parse_3mf_metadata(file_path: Path) -> Dict[str, Any]:
             for gcode_file in gcode_files:
                 try:
                     with zf.open(gcode_file) as gf:
-                        # Read full content for automation detection
-                        # Section markers can be at start or end of file
-                        gcode_content = gf.read().decode('utf-8', errors='ignore')
+                        # Optimization: Read only header + footer for metadata/automation detection.
+                        # Section markers are in startup/end code, not in the coordinate body.
+                        raw_bytes = gf.read()
+                        _PARTIAL_SIZE = 100_000  # 100KB
+                        if len(raw_bytes) > _PARTIAL_SIZE * 2:
+                            partial = raw_bytes[:_PARTIAL_SIZE] + b"\n" + raw_bytes[-_PARTIAL_SIZE:]
+                            gcode_content = partial.decode('utf-8', errors='ignore')
+                        else:
+                            gcode_content = raw_bytes.decode('utf-8', errors='ignore')
                         gcode_metadata = parse_gcode_metadata(gcode_content)
                         
                         # Store the first (main) gcode path for print command

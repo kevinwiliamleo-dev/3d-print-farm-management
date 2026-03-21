@@ -21,6 +21,7 @@ from src.config import (
 from src.database import init_db
 from src.database.db import get_db, Queue, Job
 from src.services.bambu_service import initialize_bambu_client, shutdown_bambu_client
+from src.services.cleanup_service import start_cleanup_scheduler, stop_cleanup_scheduler
 
 # Configure logging - reduce noise from uvicorn access logs
 logging.basicConfig(
@@ -169,10 +170,16 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️ Bambu MQTT client connection pending...")
     
+    # Start scheduled cleanup background task
+    start_cleanup_scheduler()
+    
     yield
     
     # Shutdown
     logger.info("Shutting down 3D Print Farm Management System")
+    
+    # Stop cleanup scheduler
+    stop_cleanup_scheduler()
     
     # Close startup database session
     if hasattr(app.state, 'startup_db'):

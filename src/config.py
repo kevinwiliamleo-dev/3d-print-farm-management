@@ -42,12 +42,9 @@ MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 500))
 ALLOWED_MODEL_EXTENSIONS = [".3mf", ".stl"]
 ALLOWED_GCODE_EXTENSIONS = [".gcode", ".g", ".gc"]
 
-# OrcaSlicer Settings
-ORCA_SLICER_PATH = os.getenv("ORCA_SLICER_PATH", "orca-slicer")
-DEFAULT_PRINTER_PROFILE = "Bambu Lab A1"
+# Slicing Defaults (used in DEFAULT_PRINT_SETTINGS)
 DEFAULT_LAYER_HEIGHT = float(os.getenv("DEFAULT_LAYER_HEIGHT", 0.2))
 DEFAULT_INFILL_DENSITY = int(os.getenv("DEFAULT_INFILL_DENSITY", 15))
-SLICING_TIMEOUT_SECONDS = int(os.getenv("SLICING_TIMEOUT_SECONDS", 300))
 
 # Bambu Lab Settings
 BAMBU_USERNAME = os.getenv("BAMBU_USERNAME", "")

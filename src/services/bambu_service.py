@@ -39,6 +39,10 @@ except ImportError:
 # Database Sync Helper (sync MQTT status to database)
 # ============================================================================
 
+# Debounce state per printer: {printer_id: {'last_time': float, 'last_status': str, 'last_progress': int}}
+_db_sync_state: Dict[str, Dict[str, Any]] = {}
+_DB_SYNC_INTERVAL = 5  # seconds - throttle temp-only updates
+
 def _sync_mqtt_status_to_db(printer_id: str, mqtt_connected: bool, status: str = None):
     """
     Sync MQTT connection status to database.
@@ -81,8 +85,28 @@ def _sync_printer_status_to_db(
     """
     Sync full printer status to database.
     Called when printer sends status updates via MQTT.
-    This ensures all printer data is available to frontend.
+    Debounced: status/progress changes write immediately,
+    temperature-only updates throttled to every 5 seconds.
     """
+    now = time.time()
+    state = _db_sync_state.get(printer_id)
+    
+    # Determine if this is a significant change (status or progress)
+    significant_change = False
+    if state is None:
+        significant_change = True  # First sync ever
+    else:
+        if status is not None and status != state.get('last_status'):
+            significant_change = True
+        if progress is not None and progress != state.get('last_progress'):
+            significant_change = True
+    
+    # Throttle: skip if no significant change and interval not elapsed
+    if not significant_change and state is not None:
+        elapsed = now - state.get('last_time', 0)
+        if elapsed < _DB_SYNC_INTERVAL:
+            return  # Skip this write
+    
     try:
         from src.database import SessionLocal
         from src.database.db import Printer
@@ -117,7 +141,32 @@ def _sync_printer_status_to_db(
                     printer.print_stage = print_stage
                 
                 db.commit()
+                
+                # Update debounce state after successful write
+                _db_sync_state[printer_id] = {
+                    'last_time': now,
+                    'last_status': status if status is not None else (state.get('last_status') if state else None),
+                    'last_progress': progress if progress is not None else (state.get('last_progress') if state else None),
+                }
+                
                 logger.debug(f"📊 Synced printer status: {printer_id}, status={status}, progress={progress}%")
+                
+                # Push status update to WebSocket clients (event-driven, no polling needed)
+                try:
+                    from src.api.websocket import broadcast_printer_status_sync
+                    broadcast_printer_status_sync(printer_id, {
+                        "status": status,
+                        "progress": progress,
+                        "nozzle_temp": nozzle_temp,
+                        "nozzle_target_temp": nozzle_target,
+                        "bed_temp": bed_temp,
+                        "bed_target_temp": bed_target,
+                        "chamber_temp": chamber_temp,
+                        "remaining_time": remaining_time,
+                        "print_stage": print_stage,
+                    })
+                except Exception:
+                    pass  # WebSocket push is best-effort
         finally:
             db.close()
     except Exception as e:
@@ -391,6 +440,15 @@ class BambuLabMQTTClient:
         self._stop_watchdog = threading.Event()
         self.WATCHDOG_INTERVAL = 60.0  # Cek koneksi setiap 60 detik
         
+        # Persistent asyncio event loop for async operations (bed cooling, etc.)
+        # Runs in a dedicated daemon thread so we can call async code from MQTT callbacks
+        # without creating a new event loop per message
+        self._async_loop = asyncio.new_event_loop()
+        self._async_loop_thread = threading.Thread(
+            target=self._async_loop.run_forever, daemon=True, name="async-loop"
+        )
+        self._async_loop_thread.start()
+        
         # Callbacks
         self.on_status_update: Optional[Callable] = None
         self.on_print_complete: Optional[Callable] = None
@@ -515,6 +573,12 @@ class BambuLabMQTTClient:
             self._stop_watchdog.set()
             if self._watchdog_thread and self._watchdog_thread.is_alive():
                 self._watchdog_thread.join(timeout=2)
+            
+            # Stop persistent async event loop
+            if self._async_loop and self._async_loop.is_running():
+                self._async_loop.call_soon_threadsafe(self._async_loop.stop)
+                if self._async_loop_thread and self._async_loop_thread.is_alive():
+                    self._async_loop_thread.join(timeout=2)
             
             self.client.loop_stop()
             self.client.disconnect()
@@ -916,16 +980,15 @@ class BambuLabMQTTClient:
             # ============================================================
             if self.cooling_service:
                 try:
-                    # Run async cooling check in thread-safe manner
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(
+                    # Schedule async cooling check on persistent event loop (thread-safe)
+                    future = asyncio.run_coroutine_threadsafe(
                         self.cooling_service.update_temperature(
                             bed_temp=self.bed_temp,
                             bed_target_temp=self.bed_target_temp
-                        )
+                        ),
+                        self._async_loop
                     )
-                    loop.close()
+                    # Don't block - fire and forget (cooling is non-critical)
                 except Exception as e:
                     logger.error(f"❌ Bed cooling check failed: {e}")
             

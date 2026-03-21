@@ -113,9 +113,10 @@ async def websocket_all_status(websocket: WebSocket):
                     pass
                     
             except asyncio.TimeoutError:
-                # Increment counter and send status every 50 iterations (~5 seconds)
+                # Increment counter and send status every 300 iterations (~30 seconds)
+                # This is now a fallback heartbeat - real updates are pushed via _process_status_queue
                 status_update_counter += 1
-                if status_update_counter >= 50:
+                if status_update_counter >= 300:
                     status_update_counter = 0
                     try:
                         await send_all_status(websocket)
@@ -431,6 +432,10 @@ def set_main_loop(loop):
     # Start background task to process progress queue
     asyncio.run_coroutine_threadsafe(_process_progress_queue(), loop)
     logger.info("Progress queue processor started")
+    
+    # Start background task to process printer status push queue
+    asyncio.run_coroutine_threadsafe(_process_status_queue(), loop)
+    logger.info("Status push queue processor started")
 
 
 async def _process_progress_queue():
@@ -464,6 +469,36 @@ async def _process_progress_queue():
             await asyncio.sleep(0.1)
 
 
+async def _process_status_queue():
+    """Background task that processes printer status push updates from MQTT thread"""
+    global _status_queue
+    
+    logger.info("🚀 Status push queue processor is running...")
+    
+    while True:
+        try:
+            try:
+                item = _status_queue.get_nowait()
+                printer_id = item['printer_id']
+                status_data = item['status']
+                
+                await manager.broadcast({
+                    "type": "printer_push_update",
+                    "printer_id": printer_id,
+                    "data": status_data,
+                    "timestamp": int(time.time() * 1000),
+                }, printer_id)
+                
+            except queue.Empty:
+                pass
+            
+            await asyncio.sleep(0.05)
+            
+        except Exception as e:
+            logger.error(f"Error in status queue processor: {e}")
+            await asyncio.sleep(0.1)
+
+
 def broadcast_upload_progress_sync(printer_id: str, progress: dict):
     """
     Synchronous wrapper to broadcast upload progress
@@ -482,3 +517,22 @@ def broadcast_upload_progress_sync(printer_id: str, progress: dict):
         logger.debug(f"📥 Progress queued: {progress.get('percent', 0)}%")
     except Exception as e:
         logger.error(f"Error in broadcast_upload_progress_sync: {e}")
+
+
+# Queue for printer status push updates (thread-safe)
+_status_queue: queue.Queue = queue.Queue()
+
+
+def broadcast_printer_status_sync(printer_id: str, status_data: dict):
+    """
+    Synchronous wrapper to push printer status updates to WebSocket clients.
+    Called from MQTT thread when printer status changes significantly.
+    """
+    global _status_queue
+    try:
+        _status_queue.put({
+            'printer_id': printer_id,
+            'status': status_data
+        })
+    except Exception as e:
+        logger.error(f"Error queuing printer status push: {e}")

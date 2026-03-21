@@ -137,6 +137,283 @@ class PrintControlService:
     
     # File preprocessing removed - files sent AS-IS from slicer
 
+    def _upload_and_start_print(self, queue_item, job, printer_id: str, is_loop_restart: bool = False) -> bool:
+        """
+        Common logic for uploading file to printer and starting print via MQTT.
+        Used by both start_next_job and _restart_print_for_loop to avoid code duplication.
+        
+        Args:
+            queue_item: Queue database object
+            job: Job database object
+            printer_id: Target printer ID
+            is_loop_restart: If True, log messages indicate loop restart
+            
+        Returns: True if print started successfully
+        """
+        import re
+        import time
+        from src.services.ftps_service import BambuFTPSClient
+        from src.api.websocket import broadcast_upload_progress_sync
+        from src.database.db import Printer
+
+        label = "RESTARTING PRINT FOR LOOP CONTINUATION" if is_loop_restart else "STARTING PRINT JOB"
+        success_label = "LOOP PRINT RESTARTED SUCCESSFULLY!" if is_loop_restart else "PRINT STARTED SUCCESSFULLY!"
+
+        print_log(f"========================================", "START")
+        print_log(f"{label}", "START")
+        print_log(f"========================================", "START")
+        print_log(f"Job Name: {job.job_name}", "INFO")
+        print_log(f"Printer ID: {printer_id}", "INFO")
+        print_log(f"Queue ID: {queue_item.queue_id}", "INFO")
+        print_log(f"Loop: {queue_item.current_loop + 1}/{job.loop_count}", "INFO")
+
+        # Update queue status to UPLOADING
+        queue_item.status = "uploading"
+        queue_item.started_at = datetime.utcnow()
+        self.db.commit()
+
+        job.status = "uploading"
+        job.updated_at = datetime.utcnow()
+        self.db.commit()
+
+        print_log(f"Status changed to UPLOADING", "PROGRESS")
+
+        # Store current job info
+        self.current_queue_id = queue_item.queue_id
+        self.current_job_id = job.job_id
+        self.print_start_time = datetime.utcnow()
+
+        # Determine file path - check for both .gcode and .3mf
+        gcode_path = f"data/gcode/{job.job_name}.gcode"
+        threemf_path = f"data/uploads/{job.filename}"
+
+        if os.path.exists(gcode_path):
+            file_path = gcode_path
+            logger.info(f"Using gcode file: {gcode_path}")
+        elif os.path.exists(threemf_path):
+            file_path = threemf_path
+            logger.info(f"Using 3mf file directly: {threemf_path}")
+        else:
+            logger.error(f"No print file found for job: {job.job_name}")
+            job.status = "failed"
+            queue_item.status = "failed"
+            self.db.commit()
+            return False
+
+        # Files are sent AS-IS from slicer without modification
+        logger.info(f"📤 Uploading file to printer: {file_path}")
+        print_log(f"Sending file as-is without modifications", "INFO")
+
+        # ==================== FILAMENT COMPATIBILITY CHECK ====================
+        # Compare filament type in file metadata vs what's loaded in the AMS slot
+        # This is a WARNING only - does not block printing
+        if queue_item.use_ams:
+            try:
+                from src.utils.gcode_parser import parse_3mf_metadata, parse_gcode_metadata
+                from src.database.db import AMSSlotAssignment
+
+                # Extract filament type from print file
+                file_filament_type = None
+                if file_path.endswith('.3mf'):
+                    file_meta = parse_3mf_metadata(file_path)
+                elif file_path.endswith('.gcode'):
+                    with open(file_path, 'r', errors='ignore') as f:
+                        # Read only first 2000 lines for metadata (header area)
+                        header_lines = ''.join(f.readline() for _ in range(2000))
+                    file_meta = parse_gcode_metadata(header_lines)
+                else:
+                    file_meta = {}
+                file_filament_type = file_meta.get('filament_type')
+
+                if file_filament_type:
+                    # Check AMS slot assignment in database
+                    ams_assignment = self.db.query(AMSSlotAssignment).filter(
+                        AMSSlotAssignment.printer_id == printer_id,
+                        AMSSlotAssignment.slot_number == queue_item.ams_slot
+                    ).first()
+
+                    if ams_assignment and ams_assignment.filament_name:
+                        loaded_type = ams_assignment.filament_name.upper()
+                        expected_type = file_filament_type.upper()
+                        # Check if the loaded filament type contains or matches the expected type
+                        # e.g. loaded="PLA Basic" should match expected="PLA"
+                        if expected_type not in loaded_type and loaded_type not in expected_type:
+                            print_log(
+                                f"FILAMENT MISMATCH! File expects '{file_filament_type}' "
+                                f"but AMS slot {queue_item.ams_slot} has '{ams_assignment.filament_name}'",
+                                "WARNING"
+                            )
+                            logger.warning(
+                                f"⚠️ Filament mismatch: file={file_filament_type}, "
+                                f"AMS slot {queue_item.ams_slot}={ams_assignment.filament_name}"
+                            )
+                        else:
+                            print_log(
+                                f"Filament check OK: {file_filament_type} matches AMS slot {queue_item.ams_slot}",
+                                "INFO"
+                            )
+                    elif ams_assignment:
+                        logger.info(f"ℹ️ AMS slot {queue_item.ams_slot} has no filament name synced, skipping check")
+                    else:
+                        logger.info(f"ℹ️ No AMS assignment found for slot {queue_item.ams_slot}, skipping check")
+                else:
+                    logger.info(f"ℹ️ No filament_type found in file metadata, skipping compatibility check")
+            except Exception as e:
+                logger.warning(f"⚠️ Filament compatibility check failed (non-blocking): {e}")
+
+        # Get printer details from database
+        printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
+        if not printer or not printer.printer_ip or not printer.access_code:
+            logger.error(f"❌ Printer not found or missing printer_ip/access_code: {printer_id}")
+            job.status = "failed"
+            queue_item.status = "failed"
+            self.db.commit()
+            return False
+
+        # Compute sanitized filename (needed for both upload and MQTT start)
+        raw_filename = os.path.basename(file_path)
+        remote_filename = re.sub(r'[^\w\-\.]', '_', raw_filename)
+        if remote_filename != raw_filename:
+            logger.info(f"📝 Filename sanitized: '{raw_filename}' → '{remote_filename}'")
+        file_size = os.path.getsize(file_path)
+
+        # For loop restarts, skip FTPS re-upload (file already on printer SD card)
+        if is_loop_restart:
+            print_log(f"⏭️ Skipping FTPS re-upload (loop restart, file already on SD card): {remote_filename}", "INFO")
+        else:
+            try:
+                ftps_client = BambuFTPSClient(
+                    host=printer.printer_ip,
+                    access_code=printer.access_code,
+                    port=990,
+                    timeout=60
+                )
+
+                with ftps_client as ftp:
+                    # Progress callback that broadcasts to WebSocket
+                    def upload_progress_callback(bytes_sent: int, total_bytes: int):
+                        percent = int((bytes_sent / total_bytes) * 100) if total_bytes > 0 else 0
+                        progress_data = {
+                            "percent": percent,
+                            "bytes_sent": bytes_sent,
+                            "total_bytes": total_bytes,
+                            "filename": remote_filename,
+                            "status": "uploading" if percent < 100 else "complete"
+                        }
+                        logger.info(f"📤 Upload progress: {percent}% ({bytes_sent}/{total_bytes})")
+                        broadcast_upload_progress_sync(printer_id, progress_data)
+
+                    # Broadcast upload start
+                    broadcast_upload_progress_sync(printer_id, {
+                        "percent": 0,
+                        "bytes_sent": 0,
+                        "total_bytes": file_size,
+                        "filename": remote_filename,
+                        "status": "starting"
+                    })
+
+                    upload_success = ftp.upload_file(file_path, remote_filename, upload_progress_callback)
+
+                    if not upload_success:
+                        logger.error(f"❌ Failed to upload file to printer: {file_path}")
+                        broadcast_upload_progress_sync(printer_id, {
+                            "percent": 0,
+                            "bytes_sent": 0,
+                            "total_bytes": file_size,
+                            "filename": remote_filename,
+                            "status": "failed"
+                        })
+                        job.status = "failed"
+                        queue_item.status = "failed"
+                        self.db.commit()
+                        return False
+
+                    # Broadcast upload complete
+                    broadcast_upload_progress_sync(printer_id, {
+                        "percent": 100,
+                        "bytes_sent": file_size,
+                        "total_bytes": file_size,
+                        "filename": remote_filename,
+                        "status": "complete"
+                    })
+                    logger.info(f"✅ File uploaded successfully: {remote_filename}")
+
+                # Small delay to ensure file is registered on SD card
+                broadcast_upload_progress_sync(printer_id, {
+                    "percent": 100,
+                    "bytes_sent": file_size,
+                    "total_bytes": file_size,
+                    "filename": remote_filename,
+                    "status": "starting_print"
+                })
+                time.sleep(2)
+
+            except Exception as ftps_err:
+                print_log(f"FTPS upload error: {ftps_err}", "ERROR")
+                import traceback
+                traceback.print_exc()
+                job.status = "failed"
+                queue_item.status = "failed"
+                self.db.commit()
+                return False
+
+        # Send MQTT command to start printing from SD card
+        print_log(f"Sending MQTT command to start print...", "START")
+        print_log(f"File: {remote_filename}", "INFO")
+        print_log(f"AMS: use_ams={queue_item.use_ams}, slot={queue_item.ams_slot}", "INFO")
+        print_log(f"Settings: bed_leveling={queue_item.auto_bed_leveling}, flow_cali={queue_item.flow_calibration}, timelapse={queue_item.timelapse}", "INFO")
+
+        # Calibration settings: True = RUN calibration, False = SKIP calibration
+        print_success = self.bambu_client.start_print_from_sd(
+            filename=remote_filename,
+            use_ams=queue_item.use_ams,
+            plate_number=1,
+            ams_slot=queue_item.ams_slot,
+            flow_cali=queue_item.flow_calibration,  # True=run, False=skip
+            vibration_cali=False,  # Always False = skip (use settings from slicer)
+            bed_leveling=queue_item.auto_bed_leveling,  # True=run, False=skip
+            timelapse=queue_item.timelapse  # True=enable video
+        )
+
+        if not print_success:
+            print_log(f"Failed to send MQTT print command!", "ERROR")
+            broadcast_upload_progress_sync(printer_id, {
+                "percent": 100,
+                "filename": remote_filename,
+                "status": "print_failed"
+            })
+            job.status = "failed"
+            queue_item.status = "failed"
+            self.db.commit()
+            return False
+
+        # Broadcast print started
+        broadcast_upload_progress_sync(printer_id, {
+            "percent": 100,
+            "filename": remote_filename,
+            "status": "print_started"
+        })
+        print_log(f"========================================", "SUCCESS")
+        print_log(f"{success_label}", "SUCCESS")
+        print_log(f"========================================", "SUCCESS")
+        if is_loop_restart:
+            print_log(f"Loop: {queue_item.current_loop + 1}/{job.loop_count}", "INFO")
+        else:
+            print_log(f"Job: {job.job_name}", "INFO")
+            print_log(f"File: {remote_filename}", "INFO")
+
+        # Update status to RUNNING
+        queue_item.status = "running"
+        job.status = "running"
+        self.db.commit()
+        print_log(f"Status changed to RUNNING", "PROGRESS")
+
+        # Track start time to prevent premature completion
+        self._last_running_time[queue_item.queue_id] = time.time()
+        logger.info(f"📊 Tracking print start time for queue_id={queue_item.queue_id}")
+
+        return True
+
     def start_next_job(self, printer_id: str) -> bool:
         """
         Get next job from queue and start printing
@@ -168,215 +445,7 @@ class PrintControlService:
                 print_log(f"Job not found: job_id={queue_item.job_id}", "ERROR")
                 return False
             
-            print_log(f"========================================", "START")
-            print_log(f"STARTING PRINT JOB", "START")
-            print_log(f"========================================", "START")
-            print_log(f"Job Name: {job.job_name}", "INFO")
-            print_log(f"Printer ID: {printer_id}", "INFO")
-            print_log(f"Queue ID: {queue_item.queue_id}", "INFO")
-            print_log(f"Loop: {queue_item.current_loop + 1}/{job.loop_count}", "INFO")
-            
-            # Update queue status to UPLOADING first (not running)
-            queue_item.status = "uploading"
-            queue_item.started_at = datetime.utcnow()
-            self.db.commit()
-            
-            # Update job status to uploading
-            job.status = "uploading"
-            job.updated_at = datetime.utcnow()
-            self.db.commit()
-            
-            print_log(f"Status changed to UPLOADING", "PROGRESS")
-            
-            # Store current job info
-            self.current_queue_id = queue_item.queue_id
-            self.current_job_id = job.job_id
-            self.print_start_time = datetime.utcnow()
-            
-            # Determine file path - check for both .gcode and .3mf
-            gcode_path = f"data/gcode/{job.job_name}.gcode"
-            threemf_path = f"data/uploads/{job.filename}"
-            
-            # Prefer .gcode if exists, otherwise use original .3mf
-            if os.path.exists(gcode_path):
-                file_path = gcode_path
-                logger.info(f"Using gcode file: {gcode_path}")
-            elif os.path.exists(threemf_path):
-                file_path = threemf_path
-                logger.info(f"Using 3mf file directly: {threemf_path}")
-            else:
-                logger.error(f"No print file found for job: {job.job_name}")
-                job.status = "failed"
-                queue_item.status = "failed"
-                self.db.commit()
-                return False
-            
-            # ==================== FILE UPLOAD ====================
-            # Files are sent AS-IS from slicer without modification
-            logger.info(f"📤 Using original file from slicer (no preprocessing)")
-            print_log(f"Sending file as-is without modifications", "INFO")
-            
-            # Upload file to printer SD card via FTPS
-            logger.info(f"📤 Uploading file to printer SD card: {file_path}")
-            from src.services.ftps_service import BambuFTPSClient
-            from src.api.websocket import broadcast_upload_progress_sync
-            from src.database.db import Printer
-            
-            # Get printer details from database (don't use empty config values)
-            printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
-            if not printer or not printer.printer_ip or not printer.access_code:
-                logger.error(f"❌ Printer not found or missing printer_ip/access_code: {printer_id}")
-                job.status = "failed"
-                queue_item.status = "failed"
-                self.db.commit()
-                return False
-            
-            try:
-                ftps_client = BambuFTPSClient(
-                    host=printer.printer_ip,
-                    access_code=printer.access_code,
-                    port=990,
-                    timeout=60
-                )
-                
-                with ftps_client as ftp:
-                    # CRITICAL: Sanitize filename before upload
-                    # Spaces and special chars cause "fail to parse the file" on printer
-                    import re
-                    raw_filename = os.path.basename(file_path)
-                    remote_filename = re.sub(r'[^\w\-\.]', '_', raw_filename)
-                    if remote_filename != raw_filename:
-                        logger.info(f"📝 Filename sanitized: '{raw_filename}' → '{remote_filename}'")
-                    file_size = os.path.getsize(file_path)
-                    
-                    # Progress callback that broadcasts to WebSocket
-                    def upload_progress_callback(bytes_sent: int, total_bytes: int):
-                        percent = int((bytes_sent / total_bytes) * 100) if total_bytes > 0 else 0
-                        progress_data = {
-                            "percent": percent,
-                            "bytes_sent": bytes_sent,
-                            "total_bytes": total_bytes,
-                            "filename": remote_filename,
-                            "status": "uploading" if percent < 100 else "complete"
-                        }
-                        logger.info(f"📤 Upload progress: {percent}% ({bytes_sent}/{total_bytes})")
-                        broadcast_upload_progress_sync(printer_id, progress_data)
-                    
-                    # Broadcast upload start
-                    broadcast_upload_progress_sync(printer_id, {
-                        "percent": 0,
-                        "bytes_sent": 0,
-                        "total_bytes": file_size,
-                        "filename": remote_filename,
-                        "status": "starting"
-                    })
-                    
-                    upload_success = ftp.upload_file(file_path, remote_filename, upload_progress_callback)
-                    
-                    if not upload_success:
-                        logger.error(f"❌ Failed to upload file to printer: {file_path}")
-                        # Broadcast upload failed
-                        broadcast_upload_progress_sync(printer_id, {
-                            "percent": 0,
-                            "bytes_sent": 0,
-                            "total_bytes": file_size,
-                            "filename": remote_filename,
-                            "status": "failed"
-                        })
-                        job.status = "failed"
-                        queue_item.status = "failed"
-                        self.db.commit()
-                        return False
-                    
-                    # Broadcast upload complete
-                    broadcast_upload_progress_sync(printer_id, {
-                        "percent": 100,
-                        "bytes_sent": file_size,
-                        "total_bytes": file_size,
-                        "filename": remote_filename,
-                        "status": "complete"
-                    })
-                    logger.info(f"✅ File uploaded successfully: {remote_filename}")
-                
-                # Small delay to ensure file is registered on SD card
-                import time
-                
-                # Broadcast starting print status
-                broadcast_upload_progress_sync(printer_id, {
-                    "percent": 100,
-                    "bytes_sent": file_size,
-                    "total_bytes": file_size,
-                    "filename": remote_filename,
-                    "status": "starting_print"
-                })
-                
-                time.sleep(2)
-                
-                # Send MQTT command to start printing from SD card using correct format
-                print_log(f"Sending MQTT command to start print...", "START")
-                print_log(f"File: {remote_filename}", "INFO")
-                print_log(f"AMS: use_ams={queue_item.use_ams}, slot={queue_item.ams_slot}", "INFO")
-                print_log(f"Settings: bed_leveling={queue_item.auto_bed_leveling}, flow_cali={queue_item.flow_calibration}, timelapse={queue_item.timelapse}", "INFO")
-                
-                # Use proper "project_file" MQTT command with full parameters
-                # This is the MQTT command that Bambu Lab firmware actually recognizes
-                # Calibration settings: True = RUN calibration, False = SKIP calibration
-                print_success = self.bambu_client.start_print_from_sd(
-                    filename=remote_filename,  # e.g., "cache/model.3mf" or full path
-                    use_ams=queue_item.use_ams,
-                    plate_number=1,
-                    ams_slot=queue_item.ams_slot,
-                    flow_cali=queue_item.flow_calibration,  # True=run, False=skip
-                    vibration_cali=False,  # Always False = skip (use settings from slicer)
-                    bed_leveling=queue_item.auto_bed_leveling,  # True=run, False=skip
-                    timelapse=queue_item.timelapse  # True=enable video
-                )
-                
-                if not print_success:
-                    print_log(f"Failed to send MQTT print command!", "ERROR")
-                    broadcast_upload_progress_sync(printer_id, {
-                        "percent": 100,
-                        "filename": remote_filename,
-                        "status": "print_failed"
-                    })
-                    job.status = "failed"
-                    queue_item.status = "failed"
-                    self.db.commit()
-                    return False
-                
-                # Broadcast print started
-                broadcast_upload_progress_sync(printer_id, {
-                    "percent": 100,
-                    "filename": remote_filename,
-                    "status": "print_started"
-                })
-                print_log(f"========================================", "SUCCESS")
-                print_log(f"PRINT STARTED SUCCESSFULLY!", "SUCCESS")
-                print_log(f"========================================", "SUCCESS")
-                print_log(f"Job: {job.job_name}", "INFO")
-                print_log(f"File: {remote_filename}", "INFO")
-                
-                # Update status to RUNNING after print started
-                queue_item.status = "running"
-                job.status = "running"
-                self.db.commit()
-                print_log(f"Status changed to RUNNING", "PROGRESS")
-                
-                # Track start time for this queue to prevent premature completion
-                import time
-                self._last_running_time[queue_item.queue_id] = time.time()
-                logger.info(f"📊 Tracking print start time for queue_id={queue_item.queue_id}")
-                
-            except Exception as ftps_err:
-                print_log(f"FTPS upload error: {ftps_err}", "ERROR")
-                import traceback
-                traceback.print_exc()
-                job.status = "failed"
-                queue_item.status = "failed"
-                self.db.commit()
-                return False
-            
-            return True
+            return self._upload_and_start_print(queue_item, job, printer_id, is_loop_restart=False)
             
         except Exception as e:
             logger.error(f"Error starting next job: {str(e)}")
@@ -415,203 +484,10 @@ class PrintControlService:
                 print_log(f"Job not found: job_id={queue_item.job_id}", "ERROR")
                 return False
             
-            print_log(f"========================================", "START")
-            print_log(f"RESTARTING PRINT FOR LOOP CONTINUATION", "START")
-            print_log(f"========================================", "START")
-            print_log(f"Job Name: {job.job_name}", "INFO")
-            print_log(f"Printer ID: {printer_id}", "INFO")
-            print_log(f"Queue ID: {queue_item.queue_id}", "INFO")
-            print_log(f"Loop: {queue_item.current_loop + 1}/{job.loop_count}", "INFO")
-            
-            # Update status to UPLOADING
-            queue_item.status = "uploading"
-            queue_item.started_at = datetime.utcnow()
-            self.db.commit()
-            
-            job.status = "uploading"
-            job.updated_at = datetime.utcnow()
-            self.db.commit()
-            
-            print_log(f"Status changed to UPLOADING", "PROGRESS")
-            
-            # Store current job info
-            self.current_queue_id = queue_item.queue_id
-            self.current_job_id = job.job_id
-            self.print_start_time = datetime.utcnow()
-            
-            # Determine file path - check for both .gcode and .3mf
-            gcode_path = f"data/gcode/{job.job_name}.gcode"
-            threemf_path = f"data/uploads/{job.filename}"
-            
-            # Prefer .gcode if exists, otherwise use original .3mf
-            if os.path.exists(gcode_path):
-                file_path = gcode_path
-                logger.info(f"Using gcode file: {gcode_path}")
-            elif os.path.exists(threemf_path):
-                file_path = threemf_path
-                logger.info(f"Using 3mf file directly: {threemf_path}")
-            else:
-                logger.error(f"No print file found for job: {job.job_name}")
-                job.status = "failed"
-                queue_item.status = "failed"
-                self.db.commit()
-                return False
-            
-            # Upload file and start print (same as start_next_job)
-            logger.info(f"📤 Uploading file to printer for loop continuation: {file_path}")
-            from src.services.ftps_service import BambuFTPSClient
-            from src.api.websocket import broadcast_upload_progress_sync
-            from src.database.db import Printer
-            
-            # Get printer details from database (not hardcoded config)
-            printer = self.db.query(Printer).filter(Printer.printer_id == printer_id).first()
-            if not printer or not printer.printer_ip or not printer.access_code:
-                logger.error(f"❌ Printer not found or missing printer_ip/access_code: {printer_id}")
-                job.status = "failed"
-                queue_item.status = "failed"
-                self.db.commit()
-                return False
-            
-            try:
-                ftps_client = BambuFTPSClient(
-                    host=printer.printer_ip,
-                    access_code=printer.access_code,
-                    port=990,
-                    timeout=60
-                )
-                
-                with ftps_client as ftp:
-                    # CRITICAL: Sanitize filename before upload
-                    # Spaces and special chars cause "fail to parse the file" on printer
-                    import re
-                    raw_filename = os.path.basename(file_path)
-                    remote_filename = re.sub(r'[^\w\-\.]', '_', raw_filename)
-                    if remote_filename != raw_filename:
-                        logger.info(f"📝 Filename sanitized: '{raw_filename}' → '{remote_filename}'")
-                    file_size = os.path.getsize(file_path)
-                    
-                    # Progress callback
-                    def upload_progress_callback(bytes_sent: int, total_bytes: int):
-                        percent = int((bytes_sent / total_bytes) * 100) if total_bytes > 0 else 0
-                        progress_data = {
-                            "percent": percent,
-                            "bytes_sent": bytes_sent,
-                            "total_bytes": total_bytes,
-                            "filename": remote_filename,
-                            "status": "uploading" if percent < 100 else "complete"
-                        }
-                        logger.info(f"📤 Upload progress: {percent}% ({bytes_sent}/{total_bytes})")
-                        broadcast_upload_progress_sync(printer_id, progress_data)
-                    
-                    # Broadcast upload start
-                    broadcast_upload_progress_sync(printer_id, {
-                        "percent": 0,
-                        "bytes_sent": 0,
-                        "total_bytes": file_size,
-                        "filename": remote_filename,
-                        "status": "starting"
-                    })
-                    
-                    upload_success = ftp.upload_file(file_path, remote_filename, upload_progress_callback)
-                    
-                    if not upload_success:
-                        logger.error(f"❌ Failed to upload file to printer: {file_path}")
-                        broadcast_upload_progress_sync(printer_id, {
-                            "percent": 0,
-                            "bytes_sent": 0,
-                            "total_bytes": file_size,
-                            "filename": remote_filename,
-                            "status": "failed"
-                        })
-                        job.status = "failed"
-                        queue_item.status = "failed"
-                        self.db.commit()
-                        return False
-                    
-                    # Broadcast upload complete
-                    broadcast_upload_progress_sync(printer_id, {
-                        "percent": 100,
-                        "bytes_sent": file_size,
-                        "total_bytes": file_size,
-                        "filename": remote_filename,
-                        "status": "complete"
-                    })
-                    logger.info(f"✅ File uploaded successfully: {remote_filename}")
-                
-                # Small delay
-                import time
-                broadcast_upload_progress_sync(printer_id, {
-                    "percent": 100,
-                    "bytes_sent": file_size,
-                    "total_bytes": file_size,
-                    "filename": remote_filename,
-                    "status": "starting_print"
-                })
-                time.sleep(2)
-                
-                # Send MQTT command to start printing
-                print_log(f"Sending MQTT command to start print...", "START")
-                print_log(f"File: {remote_filename}", "INFO")
-                print_log(f"AMS: use_ams={queue_item.use_ams}, slot={queue_item.ams_slot}", "INFO")
-                print_log(f"Settings: bed_leveling={queue_item.auto_bed_leveling}, flow_cali={queue_item.flow_calibration}, timelapse={queue_item.timelapse}", "INFO")
-                
-                # Calibration settings: True = RUN calibration, False = SKIP calibration
-                print_success = self.bambu_client.start_print_from_sd(
-                    filename=remote_filename,
-                    use_ams=queue_item.use_ams,
-                    plate_number=1,
-                    ams_slot=queue_item.ams_slot,
-                    flow_cali=queue_item.flow_calibration,  # True=run, False=skip
-                    vibration_cali=False,  # Always False = skip (use settings from slicer)
-                    bed_leveling=queue_item.auto_bed_leveling,  # True=run, False=skip
-                    timelapse=queue_item.timelapse  # True=enable video
-                )
-                
-                if not print_success:
-                    print_log(f"Failed to send MQTT print command!", "ERROR")
-                    broadcast_upload_progress_sync(printer_id, {
-                        "percent": 100,
-                        "filename": remote_filename,
-                        "status": "print_failed"
-                    })
-                    job.status = "failed"
-                    queue_item.status = "failed"
-                    self.db.commit()
-                    return False
-                
-                # Broadcast print started
-                broadcast_upload_progress_sync(printer_id, {
-                    "percent": 100,
-                    "filename": remote_filename,
-                    "status": "print_started"
-                })
-                print_log(f"========================================", "SUCCESS")
-                print_log(f"LOOP PRINT RESTARTED SUCCESSFULLY!", "SUCCESS")
-                print_log(f"========================================", "SUCCESS")
-                print_log(f"Loop: {queue_item.current_loop + 1}/{job.loop_count}", "INFO")
-                
-                # Update status to RUNNING
-                queue_item.status = "running"
-                job.status = "running"
-                self.db.commit()
-                print_log(f"Status changed to RUNNING", "PROGRESS")
-                
-                # Track start time for loop restart to prevent premature completion
-                import time
-                self._last_running_time[queue_id] = time.time()
-                logger.info(f"📊 Tracking loop restart time for queue_id={queue_id}")
-                
-            except Exception as ftps_err:
-                print_log(f"FTPS upload error: {ftps_err}", "ERROR")
-                import traceback
-                traceback.print_exc()
-                job.status = "failed"
-                queue_item.status = "failed"
-                self.db.commit()
-                return False
-            
-            logger.info(f"✅ Loop {queue_item.current_loop + 1}/{job.loop_count} print restarted for queue_id={queue_id}")
-            return True
+            result = self._upload_and_start_print(queue_item, job, printer_id, is_loop_restart=True)
+            if result:
+                logger.info(f"✅ Loop {queue_item.current_loop + 1}/{job.loop_count} print restarted for queue_id={queue_id}")
+            return result
             
         except Exception as e:
             logger.error(f"Error restarting print for loop: {str(e)}")
