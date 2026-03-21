@@ -1,6 +1,6 @@
 # 🖨️ 3D Print Farm Management System
 
-A web-based application to manage and automate 3D printing operations on a Bambu Lab A1 Combo AMS printer farm. This system handles automatic job queuing, multi-printer management, printing history tracking, and automated slicing via OrcaSlicer.
+A web-based application to manage and automate 3D printing operations on a Bambu Lab A1 Combo AMS printer farm. This system handles automatic job queuing, multi-printer management, printing history tracking, real-time MQTT monitoring, and FTPS file transfer.
 
 ## � Repository
 
@@ -38,14 +38,13 @@ git push origin main
 
 ## �📋 Project Overview
 
-**Purpose:** Streamline 3D printing operations by automating file slicing, print job scheduling, queue management, and multi-printer control.
+**Purpose:** Streamline 3D printing operations by automating print job scheduling, queue management, and multi-printer control.
 
 **Target User:** Personal 3D print farm management
 
 **Tech Stack:**
 - **Frontend:** React (Web UI with Tailwind CSS)
 - **Backend:** Python (FastAPI)
-- **Slicer:** OrcaSlicer (CLI-based automated slicing)
 - **Database:** SQLite with SQLAlchemy ORM
 - **Hardware:** Bambu Lab A1 Combo AMS + ESP32 Kit (bed cooling fan)
 - **Container:** Docker (images di GHCR)
@@ -58,7 +57,6 @@ git push origin main
 
 ### 🔄 Automated Workflow
 - **File Upload**: 3MF/STL file support
-- **Auto-Slicing**: OrcaSlicer CLI integration with custom presets
 - **Smart Queue**: FIFO with loop count support (print jobs multiple times)
 - **Auto-Transfer**: FTPS upload to printer SD card
 - **MQTT Control**: Start/stop/pause/resume commands
@@ -92,6 +90,21 @@ git push origin main
 - Print duration analytics
 
 ## 🆕 Recent Updates (March 2026)
+
+**Performance Optimizations (March 21, 2026):**
+- ✅ **9 Backend Optimizations Deployed** — commit `8d6f801`
+  1. **Dedup print workflow**: Extract `_upload_and_start_print()` helper — 965→781 lines (-184)
+  2. **Persistent asyncio event loop**: Satu daemon thread `run_forever` untuk semua MQTT async, bukan `new_event_loop()` per message
+  3. **Filament compatibility check**: Cek AMS slot vs file metadata sebelum print (WARNING only, non-blocking)
+  4. **Database write debouncing**: Throttle temp-only updates ke 5 detik, significant changes (status/progress) tetap instant — DB writes ~80% berkurang
+  5. **Remove dead OrcaSlicer code**: Hapus `OrcaSlicerManager` class (~130 baris), 3 config constants — code tidak pernah dipanggil
+  6. **Skip FTPS re-upload untuk loop prints**: File sudah di SD card, hemat 1-3 menit per loop
+  7. _(Skipped)_ Multi-printer MQTT — terlalu besar, dikerjakan terpisah nanti
+  8. **Limit G-code scan ke header+footer**: Regex scan pakai 100KB header + 100KB footer, bukan full file (50-200MB)
+  9. **Push-based WebSocket**: MQTT → DB → push ke clients (event-driven), polling interval diperpanjang ke 30s sebagai heartbeat/fallback
+  10. **Auto cleanup scheduler**: Background task setiap 24 jam — hapus temp files, old gcode (30d), logs (7d), uploads (14d), output (14d)
+  - **Files diubah**: `bambu_service.py`, `print_control_service.py`, `websocket.py`, `gcode_parser.py`, `slicer.py`, `config.py`, `main.py`, `__init__.py`
+  - **File baru**: `src/services/cleanup_service.py`
 
 **MQTT Infinite Reconnect Fix (March 3, 2026):**
 - ✅ **Root Cause Ditemukan & Diperbaiki: MQTT Disconnected Permanen**
@@ -365,29 +378,30 @@ cooking-ai-agent/
 │   ├── config.py                    # Application configuration
 │   │
 │   ├── 📂 api/                      # REST API endpoints
+│   │   ├── bed_cooling.py           # Bed cooling fan control API
 │   │   ├── bucket_list.py           # Bucket list management API
 │   │   ├── camera.py                # Camera streaming endpoints
+│   │   ├── discovery.py             # Printer discovery API
 │   │   ├── filaments.py             # Filament inventory CRUD
 │   │   ├── history.py               # Print history API
 │   │   ├── jobs.py                  # Job management (upload, delete)
-│   │   ├── presets.py               # Print presets CRUD
 │   │   ├── printers.py              # Printer management
 │   │   ├── printer_files.py         # SD card file operations
 │   │   ├── print_control.py         # Start/Stop/Pause print control
 │   │   ├── queue.py                 # Queue management API
 │   │   ├── templates.py             # G-code templates (JSON config)
-│   │   ├── templates_db.py          # G-code templates (database)
 │   │   └── websocket.py             # WebSocket real-time updates
 │   │
 │   ├── 📂 services/                 # Business logic layer
 │   │   ├── bambu_service.py         # MQTT client for Bambu Lab printers
+│   │   ├── bed_cooling_service.py   # Bed temperature monitoring & fan control
+│   │   ├── cleanup_service.py       # Auto cleanup scheduler (temp/logs/uploads)
 │   │   ├── discovery_service.py     # mDNS printer discovery
 │   │   ├── ftps_service.py          # FTPS file upload to printer
-│   │   ├── gcode_preprocessor.py    # G-code modification engine
-│   │   ├── gcode_templates.py       # Template injection logic
 │   │   ├── job_service.py           # Job processing service
+│   │   ├── printer_discovery.py     # SSDP/mDNS printer scanner
 │   │   ├── printer_service.py       # Printer state management
-│   │   ├── print_control_service.py # Print control orchestration
+│   │   ├── print_control_service.py # Print control orchestration (~780 lines)
 │   │   └── queue_service.py         # Queue processing & file prep
 │   │
 │   ├── 📂 database/                 # Database layer
@@ -397,7 +411,7 @@ cooking-ai-agent/
 │   │
 │   └── 📂 utils/                    # Utility functions
 │       ├── gcode_parser.py          # Parse G-code & 3MF metadata
-│       └── slicer.py                # OrcaSlicer CLI integration
+│       └── slicer.py                # File validation utilities
 │
 ├── 📂 frontend/                     # React frontend
 │   ├── package.json                 # NPM dependencies
@@ -457,8 +471,6 @@ cooking-ai-agent/
 | **API Endpoints** | `src/api/` - Each file handles one domain |
 | **Business Logic** | `src/services/` - Core functionality |
 | **Database Schema** | `src/database/db.py` - All SQLAlchemy models |
-| **G-code Processing** | `src/services/gcode_preprocessor.py` |
-| **Template System** | `src/services/gcode_templates.py` + `src/api/templates_db.py` |
 | **MQTT Communication** | `src/services/bambu_service.py` |
 | **File Upload (FTPS)** | `src/services/ftps_service.py` |
 | **Printer Discovery** | `src/services/discovery_service.py` |
@@ -492,34 +504,34 @@ cooking-ai-agent/
 
 ```
 ┌─────────────────────────────────┐
-│   User Upload (.3mf / .stl)     │
-│   + Custom Slicing Settings     │
+│   User Upload (.3mf pre-sliced)  │
+│   from BambuStudio/OrcaSlicer    │
 └──────────────┬──────────────────┘
                │
 ┌──────────────▼──────────────────┐
 │  Web Interface (React)           │
 │  - Upload form                  │
-│  - Settings (layer, infill)     │
 │  - Queue management             │
 │  - Dashboard & history          │
 └──────────────┬──────────────────┘
                │
 ┌──────────────▼──────────────────┐
 │  Backend (Python FastAPI)        │
-│  - Slice manager (OrcaSlicer)   │
 │  - Queue manager                │
-│  - Job scheduler                │
+│  - FTPS upload to printer       │
+│  - MQTT print control           │
+│  - Cleanup scheduler            │
 └──────────────┬──────────────────┘
                │
         ┌──────┴────────┐
         │               │
-   ┌────▼────┐    ┌────▼────┐
-   │ Database │    │ OrcaSlicer
-   │ (SQLite) │    │ (CLI)
-   │ History  │    │ 
-   │ Jobs     │    │ Bambu Lab
-   │ Queue    │    │ MQTT API
-   └──────────┘    └─────────┘
+   ┌────▼────┐    ┌────▼───────┐
+   │ Database │    │ Bambu Lab   │
+   │ (SQLite) │    │ A1 Printer  │
+   │ History  │    │ MQTT (8883) │
+   │ Jobs     │    │ FTPS (990)  │
+   │ Queue    │    └────────────┘
+   └──────────┘
 ```
 
 ---
@@ -527,37 +539,35 @@ cooking-ai-agent/
 ## 🔄 Print Flow
 
 ```
-1. USER UPLOADS FILE
-   └─> Select .3mf or .stl from local machine
-   └─> Set slicing parameters (layer height, infill, etc)
+1. USER UPLOADS PRE-SLICED FILE
+   └─> Upload .3mf (sliced in BambuStudio/OrcaSlicer)
    └─> Set number of loops (e.g., 5)
 
-2. APPLICATION SLICES FILE
-   └─> Call OrcaSlicer CLI with Bambu Lab A1 profile
-   └─> Generate optimized G-code
-   └─> Save to storage
+2. APPLICATION QUEUES JOB
+   └─> Copy file to queue_files/
+   └─> Assign queue ID
+   └─> Store in database
 
-3. APPLICATION QUEUES JOB
-   └─> Add to queue
-   └─> Assign job ID
-   └─> Store in database with slicing settings
+3. FTPS UPLOAD TO PRINTER
+   └─> Upload file to printer SD card via FTPS (port 990)
+   └─> Skip re-upload for loop prints (file already on SD)
 
 4. PRINTER STARTS PRINTING
-   └─> Send G-code to Bambu Lab A1 via MQTT
-   └─> Monitor print progress
+   └─> Send MQTT start_print_from_sd command
+   └─> Monitor progress via MQTT + WebSocket push
 
 5. PRINT COMPLETES
-   └─> Detect completion (sensor/MQTT status)
-   └─> Trigger auto-eject
-   └─> Wait for manual removal or proceed
+   └─> Detect completion (MQTT status)
+   └─> Trigger auto-eject (bed clearing)
+   └─> Auto bed cooling fan if temp > threshold
 
 6. NEXT EXECUTION
    └─> If loop count not reached → repeat print (go to step 4)
-   └─> Else → load next job from queue (go to step 4)
+   └─> Else → load next job from queue (go to step 3)
 
 7. LOGGING
    └─> Record job details in history
-   └─> Timestamp, material, duration, slicing settings, status
+   └─> Timestamp, material, duration, status
 ```
 
 ---
@@ -674,96 +684,7 @@ success = mqtt_client.send_print_file(
 
 ---
 
-## 📡 OrcaSlicer Integration
-
-### What is OrcaSlicer?
-- **Open Source** fork of Bambu Studio optimized for automation
-- **Native Bambu Lab A1 Support** - Best optimization available
-- **CLI-Based** - Perfect for headless/server deployments
-- **Lightweight** - Fast slicing performance
-- **Free** - No licensing costs
-
-### Installation
-
-1. **Windows:**
-   ```bash
-   # Via WinGet
-   winget install orcaslicer
-   
-   # Or download from GitHub
-   # https://github.com/SoftFever/OrcaSlicer/releases
-   ```
-
-2. **Linux:**
-   ```bash
-   sudo apt-get install orca-slicer
-   ```
-
-3. **macOS:**
-   ```bash
-   brew install orcaslicer
-   ```
-
-4. **Verify Installation:**
-   ```bash
-   orca-slicer --version
-   ```
-
-### CLI Usage
-
-```bash
-# Basic slicing with A1 profile (Windows)
-OrcaSlicer.exe --slice model.3mf \
-  --load-settings "Bambu Lab A1.json" \
-  --export-gcode
-
-# Linux/macOS
-orca-slicer --slice model.3mf \
-  --load-settings "Bambu Lab A1.json" \
-  --export-gcode
-
-# Export to specific output path
-orca-slicer --slice model.3mf \
-  --export-gcode model.gcode
-
-# Note: Check OrcaSlicer documentation for latest CLI options
-# https://github.com/SoftFever/OrcaSlicer/wiki/Command-Line-Interface
-```
-
-### Python Integration (Backend)
-
-```python
-import subprocess
-import os
-
-class OrcaSlicerManager:
-    def __init__(self, orca_path="orca-slicer"):
-        self.orca_path = orca_path
-        self.printer_profile = "Bambu Lab A1"
-    
-    def slice_model(self, input_file, output_gcode, 
-                   layer_height=0.2, infill=15):
-        """Slice model using OrcaSlicer CLI"""
-        cmd = [
-            self.orca_path,
-            "--slice",
-            input_file,
-            "--printer", self.printer_profile,
-            "--layer-height", str(layer_height),
-            "--infill-density", str(infill),
-            "--output", output_gcode
-        ]
-        
-        try:
-            result = subprocess.run(cmd, check=True, capture_output=True, timeout=300)
-            return {"success": True, "output": output_gcode}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-```
-
----
-
-## 📊 Database Schema (SQLite)
+##  Database Schema (SQLite)
 
 ### Jobs Table
 ```
@@ -893,7 +814,7 @@ class OrcaSlicerManager:
   - [x] AMS mapping configuration
   - [x] 3MF structure requirements
 - [ ] Full print cycle testing with real models
-- [ ] Performance optimization
+- [x] Performance optimization (9 optimizations deployed — March 21, 2026)
 
 ### Phase 5: Multi-Printer Support
 - [ ] Multi-printer architecture
@@ -935,10 +856,10 @@ Endpoints:
   GET  /kit/fan?state=status → {"status": "ON"|"OFF"}
 ```
 
-### Connection Status (Last Tested: March 3, 2026)
+### Connection Status (Last Tested: March 21, 2026)
 - ✅ MQTT Connection: Working (+ infinite reconnect, commit `1311f44`)
 - ✅ MQTT Watchdog: Active — `mqtt-watchdog` thread running (interval=60s)
-- ✅ Status Push: Receiving printer status (real-time)
+- ✅ Status Push: WebSocket push-based (event-driven, 30s heartbeat fallback)
 - ✅ Auto-Eject: Working (G28 X Y + G1 Y 230)
 - ✅ Print Start Command: API working with SD card files
 - ✅ Direct FTPS Upload: Working (port 990 implicit SSL)
@@ -949,6 +870,7 @@ Endpoints:
 - ✅ AMS Filament Settings: ams_filament_setting command working
 - ✅ AMS Load/Unload: ams_change_filament & unload_filament working
 - ✅ Bed Cooling Fan: Working (keep-alive via MQTT tick, commit `8d72169`)
+- ✅ Auto Cleanup: Running (24h interval, gcode=30d, logs=7d, uploads=14d)
 
 ---
 
@@ -1436,7 +1358,17 @@ MQTT tick (~30s)            → Re-send fan=ON (keep-alive)
 
 ## 🧹 Maintenance
 
-### Cleanup Temporary Files
+### Auto Cleanup (Active)
+System runs automatic cleanup every 24 hours via `cleanup_service.py`:
+- **G-code files** (`data/gcode/`): Deleted after 30 days
+- **Upload files** (`data/uploads/`): Deleted after 14 days
+- **Output files** (`data/3mf_output/`): Deleted after 14 days
+- **Log files** (`logs/`): Deleted after 7 days
+- **Temp files** (`data/temp_compare/`): Deleted on every run
+
+Configurable via environment variables: `CLEANUP_INTERVAL_HOURS`, `CLEANUP_GCODE_DAYS`, `CLEANUP_LOG_DAYS`, `CLEANUP_UPLOAD_DAYS`, `CLEANUP_OUTPUT_DAYS`
+
+### Manual Cleanup (if needed)
 ```bash
 # Windows PowerShell
 Get-ChildItem -Path "data/uploads" -Filter "tmp*" | Remove-Item -Force
@@ -1453,7 +1385,7 @@ cp data/farm.db data/farm_backup_$(date +%Y%m%d).db
 
 ### Log Rotation
 - Logs are stored in `logs/` directory
-- Consider setting up log rotation for production use
+- Auto cleanup deletes logs older than 7 days
 
 ---
 
@@ -1721,9 +1653,13 @@ For detailed information, see:
 This is a personal project for 3D print farm automation. For questions or suggestions, please open an issue on GitHub.
 
 **Project Status:** ✅ Production Ready  
-**Last Updated:** February 26, 2026
+**Last Updated:** March 21, 2026
 
 **Recent Fixes:**
+- ✅ 9 backend optimizations deployed (March 21, 2026) — commit `8d6f801`
+- ✅ Auto cleanup scheduler (March 21, 2026) — `cleanup_service.py`
+- ✅ Push-based WebSocket + 30s heartbeat fallback (March 21, 2026)
+- ✅ MQTT infinite reconnect fix + watchdog (March 3, 2026) — commit `1311f44`
 - ✅ Orange Pi `kit_api.py` GPIO status baca hardware langsung (Feb 26, 2026)
 - ✅ Bed cooling fan spam dihilangkan — state-based ON/OFF sekali (Feb 26, 2026) — commit `e220f30`
 - ✅ Guard 300°C corrupt MQTT data di bed cooling service (Feb 26, 2026) — commit `e220f30`
